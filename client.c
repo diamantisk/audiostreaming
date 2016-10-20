@@ -44,18 +44,12 @@ void sigint_handler(int sigint)
 	}
 }
 
-int receive_packet(fd_set *read_set, int server_fd, char **buffer, int buffer_size, long milliseconds) {
+int receive_packet(fd_set *read_set, int server_fd, char **buffer, int buffer_size, long sec, long usec) {
     int bytesread, nb;
     struct timeval timeout;
 
-    if(milliseconds >= 1000) {
-        printf("More than a sec\n");
-        timeout.tv_sec = (int) (milliseconds / 1000);
-        timeout.tv_usec = (milliseconds - ((long) timeout.tv_sec * 1000));
-    } else {
-        timeout.tv_sec = 0;
-        timeout.tv_usec = milliseconds;
-    }
+    timeout.tv_sec  = sec;
+    timeout.tv_usec = usec;
 
     // Set a timeout for the packet
     FD_ZERO(read_set);
@@ -72,7 +66,7 @@ int receive_packet(fd_set *read_set, int server_fd, char **buffer, int buffer_si
     if(FD_ISSET(server_fd, read_set)) {
         bytesread = read(server_fd, buffer, buffer_size);
         // TODO debug
-        // printf("Received %d bytes: %s\n", bytesread, info_buffer);
+//         printf("Received %d bytes\n", bytesread);
     }
 
     return bytesread;
@@ -217,9 +211,14 @@ int main (int argc, char *argv [])
 
 //    printf("Reading... BUFSIZE: %d\n", BUFSIZE);
 
-    bytesread = read(server_fd, buffer, BUFSIZE);
+//int receive_packet(fd_set *read_set, int server_fd, char **buffer, int buffer_size, long milliseconds) {
+
+    // TODO debug
+    int i = 0;
+
+    bytesread = receive_packet(&read_set, server_fd, &buffer, BUFSIZE, SERVER_TIMEOUT_SEC, SERVER_TIMEOUT_USEC);
     while (bytesread == BUFSIZE){
-        printf("Read %d bytes\n", bytesread);
+        printf("Read %d bytes (packet %d\n", bytesread, i ++);
 
         // edit data in-place. Not necessarily the best option
 //        if (pfunc)
@@ -236,11 +235,16 @@ int main (int argc, char *argv [])
 
 //            printf("That took %f seconds\n", rtt);
 
-        bytesread = read(server_fd, buffer, BUFSIZE);
-        }
+//        bytesread = read(server_fd, buffer, BUFSIZE);
+        bytesread = receive_packet(&read_set, server_fd, &buffer, BUFSIZE, SERVER_TIMEOUT_SEC, SERVER_TIMEOUT_USEC);
+    }
 
-    printf("Read %d bytes (last packet)\n", bytesread);
-    write(audio_fd, buffer, bytesread);
+    // If applicable, write the final bytes
+    if(bytesread > 0) {
+        // TODO debug
+        printf("Read %d bytes (last packet)\n", bytesread);
+        write(audio_fd, buffer, bytesread);
+    }
 
 	printf("Done\n");
 

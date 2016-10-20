@@ -78,7 +78,7 @@ int stream_data(int client_fd, struct sockaddr_in *client, char *filename)
         printf("Error: datafile not found, sending FILE_NOT_FOUND\n");
         err = sendto(client_fd, &info, sizeof(info), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
         if(err < 0) {
-            perror("Error sending info packet");
+            perror("Error sending initial packet");
         }
 
         return -1;
@@ -92,7 +92,7 @@ int stream_data(int client_fd, struct sockaddr_in *client, char *filename)
 		printf("Error: failed to open input, sending FAILURE\n");
         err = sendto(client_fd, &info, sizeof(info), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
         if(err < 0) {
-            perror("Error sending info packet");
+            perror("Error sending initial packet");
         }
 
 		return -1;
@@ -117,7 +117,7 @@ int stream_data(int client_fd, struct sockaddr_in *client, char *filename)
     }
 
 	// optionally open a library
-	if (libfile){
+	/*if (libfile){
 		// try to open the library, if one is requested
 		pfunc = NULL;
 		if (!pfunc){
@@ -129,13 +129,15 @@ int stream_data(int client_fd, struct sockaddr_in *client, char *filename)
 	else{
 		pfunc = NULL;
 		printf("not using a filter\n");
-	}
+	}*/
 
 
     // TODO debug
     printf("sample_rate: %d, sample_size: %d, channels: %d, bit_rate: %d\n", sample_rate, sample_size, channels, bit_rate);
     printf("time_per_packet: %ld nanoseconds (%f seconds)\n", time_per_packet, (float) time_per_packet / 1000000000);
     int i = 0;
+    int sent = 0;
+    srand(time(NULL));
 
     bytesread = read(data_fd, bufferfer, BUFSIZE);
     while (bytesread > 0){
@@ -146,23 +148,26 @@ int stream_data(int client_fd, struct sockaddr_in *client, char *filename)
             bytesmod = pfunc(bufferfer,bytesread);
 //			write(client_fd, bufferfer, bytesmod);
 
-        if(i > -1) {
+        if(i % 2 == 0) {
             err = sendto(client_fd, bufferfer, bytesread, 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
             if(err < 0) {
                 perror("Error sending packet");
                 return 1;
             }
+            sent ++;
+            printf("Sent %d bytes (packet number: %d)\n", bytesread, sent);
         } else {
-            printf("Skipping...\n");
+            float usleep = (rand() / (float) RAND_MAX);
+            long lsleep = 400000000 * usleep;
+//            printf("Skipping... rand: %ld\n", lsleep);
+            nsleep(lsleep);
         }
 
-        printf("Sent %d bytes (packet number: %d)\n", bytesread, i);
+        i ++;
 
         nsleep(time_per_packet);
 
         bytesread = read(data_fd, bufferfer, BUFSIZE);
-
-        i ++;
     }
 
 	// TO IMPLEMENT : optionally close the connection gracefully 	
