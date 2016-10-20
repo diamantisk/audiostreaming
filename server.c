@@ -73,10 +73,10 @@ int stream_data(int client_fd, struct sockaddr_in *client, char *filename)
 //        channels = 2;
 	}
 
-	sample_size = 8;
-    sample_rate = 11025;
-    channels = 1;
-	
+//	sample_size = 8;
+//    sample_rate = 11025;
+//    channels = 1;
+//
 	// open input
     data_fd = aud_readinit(datafile, &sample_rate, &sample_size, &channels);
 	if (data_fd < 0){
@@ -85,15 +85,19 @@ int stream_data(int client_fd, struct sockaddr_in *client, char *filename)
 	}
 	printf("opened datafile %s\n",datafile);
 
+    // debug
+//    sample_rate = sample_rate * 5;
+//    bit_rate = bit_rate * 8;
+
 	bit_rate = sample_size * sample_rate * channels;
 	time_per_packet = 1000000000 * ((float) BUFSIZE / (float) bit_rate);
+	time_per_packet = time_per_packet * 8;
 
     // create an acknowledgement packet
     struct audio_info info;
     info.sample_rate = sample_rate;
     info.sample_size = sample_size;
     info.channels = channels;
-    info.bit_rate = bit_rate;
     strncpy(info.filename, filename, FILENAME_MAX);
 
     printf("info sample size: %d, info filename: %s, sizeof(info): %d\n", info.sample_size, info.filename, sizeof(info));
@@ -154,9 +158,9 @@ int stream_data(int client_fd, struct sockaddr_in *client, char *filename)
 
         int i = 0;
 
-        return 0;
+//        return 0;
 
-        nsleep(1 * 1000000000);
+//        nsleep(1 * 1000000000);
 
 		bytesread = read(data_fd, buffer, BUFSIZE);
 		while (bytesread > 0){
@@ -182,8 +186,8 @@ int stream_data(int client_fd, struct sockaddr_in *client, char *filename)
 			printf("Sent %d bytes (I'm a server, i: %d)\n", bytesread, i++);
 			i--;
 
-            nsleep(time_per_packet * 5);
-            printf("I just slept %ld miliseconds (%ld nanoseconds)\n", time_per_packet / 1000000, time_per_packet);
+            nsleep(time_per_packet);
+//            printf("I just slept %ld miliseconds (%ld nanoseconds)\n", time_per_packet / 1000000, time_per_packet);
 
             /** Client stuff here START **/
 //            write(audio_fd, buffer, bytesread);
@@ -226,7 +230,7 @@ int main (int argc, char **argv)
 	printf ("handed in by tsg280\n");
 
 	int client_fd, err;
-	char buf[BUFSIZE];
+	char buf[FILENAME_MAX];
 	socklen_t flen;
 	struct sockaddr_in client;
 	
@@ -263,17 +267,19 @@ int main (int argc, char **argv)
 		// 	when a client connects, start streaming data (see the stream_data(...) prototype above)
 
 		printf("Waiting...\n");
+		printf("BUFSIZE: %d\n", BUFSIZE);
 
-		err = recvfrom(client_fd, buf, BUFSIZE, 0, (struct sockaddr*) &client, &flen);
+		err = recvfrom(client_fd, buf, FILENAME_MAX, 0, (struct sockaddr*) &client, &flen);
 		if(err < 0) {
 			perror("Error receiving packet");
 			return 1;
 		}
 
-		printf("Received %d bytes from port %d: %s\n", err, ntohs(client.sin_port), buf);
+		char filename[err + 1];
+        strncpy(filename, buf, err);
+        filename[err] = '\0';
 
-        char ack[err];
-        strncpy(ack, buf, err);
+		printf("Received %d bytes from port %d: %s (bufsize: %d, filename size: %d)\n", err, ntohs(client.sin_port), filename, sizeof(buf), strlen(filename));
 
 //		printf("Sending ack (%d bytes): %s\n", err, ack);
 //		err = sendto(client_fd, ack, err, 0, (struct sockaddr*) &client, sizeof(struct sockaddr_in));
@@ -282,7 +288,7 @@ int main (int argc, char **argv)
 //            return 1;
 //        }
 
-		stream_data(client_fd, &client, buf);
+		stream_data(client_fd, &client, filename);
 
 		printf("Done streaming\n");
 

@@ -1,0 +1,7 @@
+client
+server
+*.o
+*.so
+*.git
+*.tar
+.gitignore

@@ -18,6 +18,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <sys/time.h>
 
 #include "library.h"
 #include "audio.h"
@@ -70,7 +71,6 @@ int main (int argc, char *argv [])
 	struct timeval start, end;
 	double rtt;
 
-	socklen_t flen;
 	char *ip;
 	struct sockaddr_in server;
 	
@@ -81,6 +81,14 @@ int main (int argc, char *argv [])
 		printf ("error : called with incorrect number of parameters\nusage : %s <server_name/IP> <filename> [<filter> [filter_options]]]\n", argv[0]) ;
 		return -1;
 	}
+
+	char *filename = argv[2];
+
+	if(strlen(filename) > FILESIZE_MAX) {
+
+	}
+
+//	printf("filename: %s (size: %d)\n", filename, strlen(filename));
 	
 	// TO IMPLEMENT : open input
 	/* Working on this */
@@ -96,8 +104,6 @@ int main (int argc, char *argv [])
 	server.sin_family = AF_INET;
 	server.sin_port = htons(PORT);
 	server.sin_addr.s_addr = inet_addr(ip);
-
-	flen = sizeof(struct sockaddr_in);
 
 	server_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if(server_fd < 0) {
@@ -116,17 +122,16 @@ int main (int argc, char *argv [])
 
 	// OWN STUFF
 	// send packet with file name
-	char ack[sizeof(argv[2]) + 1];
-	strncpy(ack, argv[2], sizeof(argv[2]));
-	err = sendto(server_fd, ack, sizeof(argv[2]), 0, (struct sockaddr*) &server, sizeof(struct sockaddr_in));
+
+//	char ack[strlen(filename)];
+//	strncpy(ack, filename, strlen(filename));
+	err = sendto(server_fd, filename, strlen(filename), 0, (struct sockaddr*) &server, sizeof(struct sockaddr_in));
 	if(err < 0) {
 		perror("Error sending packet");
 		return 1;
 	}
 
-	printf("Sent: %s (length: %d)\n", ack, sizeof(ack));
-
-
+	printf("Sent: %s (length: %lu)\n", filename, sizeof(filename));
 
 	printf("Waiting for ack\n");
 
@@ -137,9 +142,9 @@ int main (int argc, char *argv [])
 
 	nb = select(server_fd + 1, &read_set, NULL, NULL, &timeout);
 
-	int bytesread, bytesmod;
-	char *info_buffer[sizeof(struct audio_info)];
-	printf("Made info_buffer with size: %d\n", sizeof(struct audio_info));
+	int bytesread;
+	char info_buffer[sizeof(struct audio_info)];
+	printf("Made info_buffer with size: %lu\n", sizeof(struct audio_info));
 
 	if(nb < 0) {
 	    perror("Error waiting for timeout");
@@ -156,7 +161,12 @@ int main (int argc, char *argv [])
 
     struct audio_info *info = (struct audio_info *) info_buffer;
 
-    printf("sample_rate: %d, sample_size: %d, channels: %d, bit_rate: %d\n", info->sample_rate, info->sample_size, info->channels, info->bit_rate);
+    sample_size = info->sample_size;
+    sample_rate = info->sample_rate;
+    channels = info->channels;
+
+    printf("sample_rate: %d, sample_size: %d, channels: %d\n", info->sample_rate, info->sample_size, info->channels);
+    printf("sample_rate: %d, sample_size: %d, channels: %d\n", sample_rate, sample_size, channels);
 
 //    printf("info size: %d (BUFSIZE: %d)\n", sizeof(info), BUFSIZE);
 //    printf("info_buffer size: %d (BUFSIZE: %d)\n", sizeof(info_buffer), BUFSIZE);
@@ -164,12 +174,12 @@ int main (int argc, char *argv [])
 //	bytesread = read(server_fd, buf, BUFSIZE);
 
 	{
-		sample_size = 8;
-        sample_rate = 11025;
-        channels = 1;
+//		sample_size = 8;
+//        sample_rate = 11025;
+//        channels = 1;
 	}
 
-	return 0;
+//	return 0;
 
 	// open output
 	audio_fd = aud_writeinit(sample_rate, sample_size, channels);
@@ -197,16 +207,16 @@ int main (int argc, char *argv [])
 	// start receiving data
 	{
 //		int bytesread, bytesmod;
-		char *modbuffer;
+//		char *modbuffer;
 
-		printf("Reading...\n");
+		printf("Reading... BUFSIZE: %d\n", BUFSIZE);
 
 		bytesread = read(server_fd, buf, BUFSIZE);
 		while (bytesread == BUFSIZE){
 		    printf("Read %d bytes (I'm a client)\n", bytesread);
 			// edit data in-place. Not necessarily the best option
 			if (pfunc)
-				modbuffer = pfunc(buf,bytesread,&bytesmod);
+//				modbuffer = pfunc(buf,bytesread,&bytesmod);
 //			write(audio_fd, modbuffer, bytesmod);
 
             gettimeofday(&start, NULL);
@@ -218,7 +228,7 @@ int main (int argc, char *argv [])
             rtt = (end.tv_sec - start.tv_sec);
             rtt += (end.tv_usec - start.tv_usec) / 1000000.0;
 
-            printf("That took %f seconds\n", rtt);
+//            printf("That took %f seconds\n", rtt);
 
 			bytesread = read(server_fd, buf, BUFSIZE);
 		}
