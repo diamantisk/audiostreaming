@@ -13,21 +13,26 @@
 #include <dlfcn.h>
 #include <signal.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <time.h>
 
 #include "library.h"
 #include "audio.h"
 #include "packet.h"
 
-/// a define used for the copy buffer in stream_data(...)
-
 static int breakloop = 0;	///< use this variable to stop your wait-loop. Occasionally check its value, !1 signals that the program should close
 
-//struct __attribute__((packed)) audio_info {
-//    int channels, sample_size, sample_rate, bit_rate;
-//    char filename[FILENAME_MAX];
-//};
+/** Title
+ *
+ * @return
+ */
 
+/** Sleep for a specified amount of time
+ *
+ * @param nanoseconds   The amount of nanoseconds to sleep
+ *
+ * @return  0 on success, or -1 in case of an interrupt
+ */
 int nsleep(long nanoseconds) {
     struct timespec req, rem;
 
@@ -43,6 +48,7 @@ int nsleep(long nanoseconds) {
     return nanosleep(&req, &rem);
 }
 
+// TODO documentation
 /// stream data to a client. 
 ///
 /// This is an example function; you do *not* have to use this and can choose a different flow of control
@@ -51,63 +57,63 @@ int nsleep(long nanoseconds) {
 /// @return returns 0 on success or a negative errorcode on failure
 int stream_data(int client_fd, struct sockaddr_in *client, char *filename)
 {
-    printf("Start streaming... const: %d\n", FILENAME_MAX);
-
 	int data_fd, err;
+	int bytesread, bytesmod;
 	int channels, sample_size, sample_rate, bit_rate;
 	server_filterfunc pfunc;
 	char *datafile, *libfile;
-	char buffer[BUFSIZE];
-
+	char bufferfer[BUFSIZE];
 	long time_per_packet;   // Nanoseconds
-	
-	// TO IMPLEMENT
-	// receive a control packet from the client 
-	// containing at the least the name of the file to stream and the library to use
-	{
-		datafile = strdup(filename);
-		libfile = NULL;
+	struct audio_info info;
 
-//		sample_size = 4;
-//        sample_rate = 44100;
-//        channels = 2;
-	}
+	datafile = strdup(filename);
 
-//	sample_size = 8;
-//    sample_rate = 11025;
-//    channels = 1;
-//
-	// open input
+	// TODO implement
+	libfile = NULL;
+
+    // Check for file existence
+    if(access(datafile, F_OK) == -1) {
+        info.status = FILE_NOT_FOUND;
+
+        printf("Error: datafile not found, sending FILE_NOT_FOUND\n");
+        err = sendto(client_fd, &info, sizeof(info), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
+        if(err < 0) {
+            perror("Error sending info packet");
+        }
+
+        return -1;
+    }
+
+	// Open input
     data_fd = aud_readinit(datafile, &sample_rate, &sample_size, &channels);
 	if (data_fd < 0){
-		printf("failed to open datafile %s, skipping request\n",datafile);
+		info.status = FAILURE;
+
+		printf("Error: failed to open input, sending FAILURE\n");
+        err = sendto(client_fd, &info, sizeof(info), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
+        if(err < 0) {
+            perror("Error sending info packet");
+        }
+
 		return -1;
 	}
-	printf("opened datafile %s\n",datafile);
 
-    // debug
-//    sample_rate = sample_rate * 5;
-//    bit_rate = bit_rate * 8;
-
+    // Calculate audio info
 	bit_rate = sample_size * sample_rate * channels;
-	time_per_packet = 1000000000 * ((float) BUFSIZE / (float) bit_rate);
-	time_per_packet = time_per_packet * 8;
+	time_per_packet = 8000000000 * ((float) BUFSIZE / (float) bit_rate);
 
-    // create an acknowledgement packet
-    struct audio_info info;
+    // create initial packet
     info.sample_rate = sample_rate;
     info.sample_size = sample_size;
     info.channels = channels;
+    info.status = SUCCESS;
     strncpy(info.filename, filename, FILENAME_MAX);
 
-    printf("info sample size: %d, info filename: %s, sizeof(info): %d\n", info.sample_size, info.filename, sizeof(info));
-
-
-    printf("Sending info (%d bytes): %s\n", sizeof(info), info.filename);
+    printf("Sending initial packet\n");
     err = sendto(client_fd, &info, sizeof(info), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
     if(err < 0) {
-        perror("Error sending info packet");
-        return 1;
+        perror("Error sending initial packet");
+        return -1;
     }
 
 	// optionally open a library
@@ -124,77 +130,40 @@ int stream_data(int client_fd, struct sockaddr_in *client, char *filename)
 		pfunc = NULL;
 		printf("not using a filter\n");
 	}
-	
-	// TO IMPLEMENT : optionally return an error code to the client if initialization went wrong
-	
-	// start streaming
 
 
-	{
-		int bytesread, bytesmod;
+    // TODO debug
+    printf("sample_rate: %d, sample_size: %d, channels: %d, bit_rate: %d\n", sample_rate, sample_size, channels, bit_rate);
+    printf("time_per_packet: %ld nanoseconds (%f seconds)\n", time_per_packet, (float) time_per_packet / 1000000000);
+    int i = 0;
 
-		/** Client stuff here START **/
-        // open output
-//        int audio_fd;
-//        audio_fd = aud_writeinit(sample_rate, sample_size, channels);
-//        if (audio_fd < 0){
-//            printf("error: unable to open audio output.\n");
-//            return -1;
-//        }
-        /** Client stuff here END **/
+    bytesread = read(data_fd, bufferfer, BUFSIZE);
+    while (bytesread > 0){
+        // you might also want to check that the client is still active, whether it wants resends, etc..
 
-        printf("sample_rate: %d, sample_size: %d, channels: %d, bit_rate: %d\n", sample_rate, sample_size, channels, bit_rate);
-        printf("time_per_packet: %ld nanoseconds (%f seconds)\n", time_per_packet, (float) time_per_packet / 1000000000);
+        // edit data in-place. Not necessarily the best option
+        if (pfunc)
+            bytesmod = pfunc(bufferfer,bytesread);
+//			write(client_fd, bufferfer, bytesmod);
 
-//        return 0;
-
-//        int i = 0;
-//        while(i < 10) {
-//            printf("hi %d\n", i ++);
-//            nsleep(time_per_packet);
-//        }
-//
-//		return 0;
-
-        int i = 0;
-
-//        return 0;
-
-//        nsleep(1 * 1000000000);
-
-		bytesread = read(data_fd, buffer, BUFSIZE);
-		while (bytesread > 0){
-//		    printf("Read %d bytes\n", bytesread);
-			// you might also want to check that the client is still active, whether it wants resends, etc..
-			
-			// edit data in-place. Not necessarily the best option
-			if (pfunc)
-				bytesmod = pfunc(buffer,bytesread);
-
-//			write(client_fd, buffer, bytesmod);
-
-            if(i > -1) {
-                err = sendto(client_fd, buffer, bytesread, 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
-                if(err < 0) {
-                    perror("Error sending packet");
-                    return 1;
-                }
-            } else {
-                printf("Skipping...\n");
+        if(i > -1) {
+            err = sendto(client_fd, bufferfer, bytesread, 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
+            if(err < 0) {
+                perror("Error sending packet");
+                return 1;
             }
+        } else {
+            printf("Skipping...\n");
+        }
 
-			printf("Sent %d bytes (I'm a server, i: %d)\n", bytesread, i++);
-			i--;
+        printf("Sent %d bytes (packet number: %d)\n", bytesread, i);
 
-            nsleep(time_per_packet);
-//            printf("I just slept %ld miliseconds (%ld nanoseconds)\n", time_per_packet / 1000000, time_per_packet);
+        nsleep(time_per_packet);
 
-            /** Client stuff here START **/
-//            write(audio_fd, buffer, bytesread);
+        bytesread = read(data_fd, bufferfer, BUFSIZE);
 
-			bytesread = read(data_fd, buffer, BUFSIZE);
-		}
-	}
+        i ++;
+    }
 
 	// TO IMPLEMENT : optionally close the connection gracefully 	
 	
@@ -226,17 +195,15 @@ void sigint_handler(int sigint)
 /// the main loop, continuously waiting for clients
 int main (int argc, char **argv)
 {
-	printf ("SysProg network server\n");
-	printf ("handed in by tsg280\n");
-
 	int client_fd, err;
-	char buf[FILENAME_MAX];
+	char buffer[FILENAME_MAX];
 	socklen_t flen;
 	struct sockaddr_in client;
 	
 	// TODO re-enable for submission
-	// signal(SIGINT, sigint_handler );	// trap Ctrl^C signals
+//	 signal(SIGINT, sigint_handler );	// trap Ctrl^C signals
 
+    // Set up the client socket
 	client_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	if(client_fd < 0) {
 		perror("Error initializing socket");
@@ -254,45 +221,28 @@ int main (int argc, char **argv)
 		perror("Error binding socket");
 		return 1;
 	}
-
-	printf("Bound port %d\n", PORT);
-
-//	stream_data(client_fd, &client, "long.wav");
-//
-//    return 0;
 	
 	while (!breakloop){
-		// TO IMPLEMENT:
-		// 	wait for connections
-		// 	when a client connects, start streaming data (see the stream_data(...) prototype above)
 
-		printf("Waiting...\n");
-		printf("BUFSIZE: %d\n", BUFSIZE);
-
-		err = recvfrom(client_fd, buf, FILENAME_MAX, 0, (struct sockaddr*) &client, &flen);
+	    // Wait for incoming messages
+		printf("Listening on port %d\n", PORT);
+		err = recvfrom(client_fd, buffer, FILENAME_MAX, 0, (struct sockaddr*) &client, &flen);
 		if(err < 0) {
 			perror("Error receiving packet");
-			return 1;
+			return -1;
 		}
 
+        // Store the filename
 		char filename[err + 1];
-        strncpy(filename, buf, err);
+        strncpy(filename, buffer, err);
         filename[err] = '\0';
 
-		printf("Received %d bytes from port %d: %s (bufsize: %d, filename size: %d)\n", err, ntohs(client.sin_port), filename, sizeof(buf), strlen(filename));
-
-//		printf("Sending ack (%d bytes): %s\n", err, ack);
-//		err = sendto(client_fd, ack, err, 0, (struct sockaddr*) &client, sizeof(struct sockaddr_in));
-//        if(err < 0) {
-//            perror("Error sending packet");
-//            return 1;
-//        }
-
-		stream_data(client_fd, &client, filename);
-
-		printf("Done streaming\n");
-
-//		printf("Received %d bytes from host %s port %d: %s\n", err, inet_ntoa(client.sin_addr), ntohs(client.sin_port), buf);
+        // Print a recognizable start and end of the streaming progress to stdout
+        printf("---- Request received - %s:%d - %s\n", inet_ntoa(client.sin_addr), ntohs(client.sin_port), filename);
+		err = stream_data(client_fd, &client, filename);
+		printf("---- Request processed - %s:%d - %s - ", inet_ntoa(client.sin_addr), ntohs(client.sin_port), filename);
+		(err == 0) ? (printf("Success")) : (printf("Failure"));
+		printf(" ----\n");
 	}
 
 	return 0;

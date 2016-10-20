@@ -7,6 +7,7 @@ struct __attribute__((packed)) audio_info {
     int sample_size;
     int sample_rate;
     char filename[FILESIZE_MAX];
+    enum flag {SUCCESS, FILE_NOT_FOUND, FAILURE} status;
 };
 
 struct __attribute__((packed)) packet {

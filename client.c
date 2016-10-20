@@ -24,6 +24,9 @@
 #include "audio.h"
 #include "packet.h"
 
+#define SERVER_TIMEOUT_SEC 1
+#define SERVER_TIMEOUT_USEC 0
+
 static int breakloop = 0;	///< use this variable to stop your wait-loop. Occasionally check its value, !1 signals that the program should close
 
 /// unimportant: the signal handler. This function gets called when Ctrl^C is pressed
@@ -61,18 +64,15 @@ int main (int argc, char *argv [])
 	int server_fd, audio_fd, err, nb;
 	int sample_size, sample_rate, channels;
 	client_filterfunc pfunc;
-	char buf[BUFSIZE];
-
-	// for ack
+	char *buffer[BUFSIZE];
 	fd_set read_set;
 	struct timeval timeout;
-
-	// debug
 	struct timeval start, end;
 	double rtt;
-
 	char *ip;
 	struct sockaddr_in server;
+	int bytesread;
+	char info_buffer[sizeof(struct audio_info)];
 	
 	signal( SIGINT, sigint_handler );	// trap Ctrl^C signals
 	
@@ -82,19 +82,16 @@ int main (int argc, char *argv [])
 		return -1;
 	}
 
+    // Verify the filename length
 	char *filename = argv[2];
-
 	if(strlen(filename) > FILESIZE_MAX) {
-
+        printf("Filename is too long, max %d characters\n", FILESIZE_MAX);
+        return -1;
 	}
 
-//	printf("filename: %s (size: %d)\n", filename, strlen(filename));
-	
-	// TO IMPLEMENT : open input
-	/* Working on this */
 	ip = resolve_hostname(argv[1]);
 
-	printf("ip: %s\n", ip);
+    // Set up the server socket
 	server_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	if (server_fd < 0){
 		perror("Error initializing socket");
@@ -105,83 +102,57 @@ int main (int argc, char *argv [])
 	server.sin_port = htons(PORT);
 	server.sin_addr.s_addr = inet_addr(ip);
 
-	server_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if(server_fd < 0) {
-            perror("Error initializing socket");
-            return 1;
-    }
+    // Send the filename to the server
+    // TODO make packet with library information
 
-	if (server_fd < 0){
-		printf("error: unable to connect to server.\n");
-		return -1;
-	}
-
-	// TO IMPLEMENT
-	// send the requested filename and library information to the server
-	// and wait for an acknowledgement. Or fail if the server returns an errorcode
-
-	// OWN STUFF
-	// send packet with file name
-
-//	char ack[strlen(filename)];
-//	strncpy(ack, filename, strlen(filename));
+    printf("Requesting %s from %s:%d\n", filename, ip, PORT);
 	err = sendto(server_fd, filename, strlen(filename), 0, (struct sockaddr*) &server, sizeof(struct sockaddr_in));
 	if(err < 0) {
 		perror("Error sending packet");
-		return 1;
+		return -1;
 	}
 
-	printf("Sent: %s (length: %lu)\n", filename, sizeof(filename));
-
-	printf("Waiting for ack\n");
-
+    // Set a timeoutfor the initial packet
 	FD_ZERO(&read_set);
 	FD_SET(server_fd, &read_set);
-	timeout.tv_sec = 1;
-	timeout.tv_usec = 0;
+	timeout.tv_sec = SERVER_TIMEOUT_SEC;
+	timeout.tv_usec = SERVER_TIMEOUT_USEC;
 
 	nb = select(server_fd + 1, &read_set, NULL, NULL, &timeout);
 
-	int bytesread;
-	char info_buffer[sizeof(struct audio_info)];
-	printf("Made info_buffer with size: %lu\n", sizeof(struct audio_info));
-
+    // Parse the result of the timeout
 	if(nb < 0) {
 	    perror("Error waiting for timeout");
 	} else
     if(nb == 0) {
-        printf("Acknowledgement packet was lost, assuming that server is busy\n");
+        printf("No reply, assuming that server is busy or down\n");
         return 1;
     } else
     if(FD_ISSET(server_fd, &read_set)) {
         bytesread = read(server_fd, info_buffer, BUFSIZE);
-        printf("Received %d bytes: %s\n", bytesread, info_buffer);
-//        return 0;
+        // TODO debug
+//        printf("Received %d bytes: %s\n", bytesread, info_buffer);
     }
 
+    // Parse the initial packet
     struct audio_info *info = (struct audio_info *) info_buffer;
+    if(info->status == FILE_NOT_FOUND) {
+        printf("Server responded: file not found\n");
+        return -1;
+    } else
+    if(info->status == FAILURE) {
+        printf("Server responded: failure\n");
+        return -1;
+    }
 
     sample_size = info->sample_size;
     sample_rate = info->sample_rate;
-    channels = info->channels;
+    channels    = info->channels;
 
-    printf("sample_rate: %d, sample_size: %d, channels: %d\n", info->sample_rate, info->sample_size, info->channels);
-    printf("sample_rate: %d, sample_size: %d, channels: %d\n", sample_rate, sample_size, channels);
+    // TODO debug
+//    printf("sample_rate: %d, sample_size: %d, channels: %d\n", sample_rate, sample_size, channels);
 
-//    printf("info size: %d (BUFSIZE: %d)\n", sizeof(info), BUFSIZE);
-//    printf("info_buffer size: %d (BUFSIZE: %d)\n", sizeof(info_buffer), BUFSIZE);
-
-//	bytesread = read(server_fd, buf, BUFSIZE);
-
-	{
-//		sample_size = 8;
-//        sample_rate = 11025;
-//        channels = 1;
-	}
-
-//	return 0;
-
-	// open output
+	// Open output
 	audio_fd = aud_writeinit(sample_rate, sample_size, channels);
 	if (audio_fd < 0){
 		printf("error: unable to open audio output.\n");
@@ -201,38 +172,35 @@ int main (int argc, char *argv [])
 	}
 	else{
 		pfunc = NULL;
-		printf("not using a filter\n");
+		printf("Not using a filter\n");
 	}
 
-	// start receiving data
-	{
-//		int bytesread, bytesmod;
-//		char *modbuffer;
+//    printf("Reading... BUFSIZE: %d\n", BUFSIZE);
 
-		printf("Reading... BUFSIZE: %d\n", BUFSIZE);
+    bytesread = read(server_fd, buffer, BUFSIZE);
+    while (bytesread == BUFSIZE){
+        printf("Read %d bytes\n", bytesread);
 
-		bytesread = read(server_fd, buf, BUFSIZE);
-		while (bytesread == BUFSIZE){
-		    printf("Read %d bytes (I'm a client)\n", bytesread);
-			// edit data in-place. Not necessarily the best option
-			if (pfunc)
-//				modbuffer = pfunc(buf,bytesread,&bytesmod);
-//			write(audio_fd, modbuffer, bytesmod);
+        // edit data in-place. Not necessarily the best option
+//        if (pfunc)
+//				modbufferfer = pfunc(buffer,bytesread,&bytesmod);
+//			write(audio_fd, modbufferfer, bytesmod);
 
-            gettimeofday(&start, NULL);
+//        gettimeofday(&start, NULL);
 
-            write(audio_fd, buf, bytesread);
+        write(audio_fd, buffer, bytesread);
 
-            gettimeofday(&end, NULL);
-
-            rtt = (end.tv_sec - start.tv_sec);
-            rtt += (end.tv_usec - start.tv_usec) / 1000000.0;
+//        gettimeofday(&end, NULL);
+//        rtt = (end.tv_sec - start.tv_sec);
+//        rtt += (end.tv_usec - start.tv_usec) / 1000000.0;
 
 //            printf("That took %f seconds\n", rtt);
 
-			bytesread = read(server_fd, buf, BUFSIZE);
-		}
-	}
+        bytesread = read(server_fd, buffer, BUFSIZE);
+        }
+
+    printf("Read %d bytes (last packet)\n", bytesread);
+    write(audio_fd, buffer, bytesread);
 
 	printf("Done\n");
 
