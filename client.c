@@ -44,6 +44,46 @@ void sigint_handler(int sigint)
 	}
 }
 
+int receive_packet(fd_set *read_set, int server_fd, char **buffer, int buffer_size, long milliseconds) {
+    int bytesread, nb;
+    struct timeval timeout;
+
+    if(milliseconds >= 1000) {
+        printf("More than a sec\n");
+        timeout.tv_sec = (int) (milliseconds / 1000);
+        timeout.tv_usec = (milliseconds - ((long) timeout.tv_sec * 1000));
+    } else {
+        timeout.tv_sec = 0;
+        timeout.tv_usec = milliseconds;
+    }
+
+    // Set a timeout for the packet
+    FD_ZERO(read_set);
+    FD_SET(server_fd, read_set);
+
+    nb = select(server_fd + 1, read_set, NULL, NULL, &timeout);
+    if(nb < 0) {
+        perror("Error waiting for timeout");
+    } else
+    if(nb == 0) {
+        printf("No reply, assuming that server is down\n");
+        return -1;
+    } else
+    if(FD_ISSET(server_fd, read_set)) {
+        bytesread = read(server_fd, buffer, buffer_size);
+        // TODO debug
+        // printf("Received %d bytes: %s\n", bytesread, info_buffer);
+    }
+
+    return bytesread;
+}
+
+/** Resolve the hostname of an IP
+ *
+ * @param name   The hostname
+ *
+ * @return  The IP on success, <0 otherwise
+ */
 char *resolve_hostname(char *name) {
     struct hostent *resolve;
     struct in_addr *addr;
@@ -67,8 +107,8 @@ int main (int argc, char *argv [])
 	char *buffer[BUFSIZE];
 	fd_set read_set;
 	struct timeval timeout;
-	struct timeval start, end;
-	double rtt;
+//	struct timeval start, end;
+//	double rtt;
 	char *ip;
 	struct sockaddr_in server;
 	int bytesread;
@@ -112,7 +152,7 @@ int main (int argc, char *argv [])
 		return -1;
 	}
 
-    // Set a timeoutfor the initial packet
+    // Set a timeout for the initial packet
 	FD_ZERO(&read_set);
 	FD_SET(server_fd, &read_set);
 	timeout.tv_sec = SERVER_TIMEOUT_SEC;
@@ -126,7 +166,7 @@ int main (int argc, char *argv [])
 	} else
     if(nb == 0) {
         printf("No reply, assuming that server is busy or down\n");
-        return 1;
+        return -1;
     } else
     if(FD_ISSET(server_fd, &read_set)) {
         bytesread = read(server_fd, info_buffer, BUFSIZE);
