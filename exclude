@@ -4,4 +4,7 @@ server
 *.so
 *.git
 *.tar
+*.wav
+alias*
 .gitignore
+issues

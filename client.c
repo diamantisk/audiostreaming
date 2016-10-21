@@ -24,8 +24,8 @@
 #include "audio.h"
 #include "packet.h"
 
-#define SERVER_TIMEOUT_SEC 1
-#define SERVER_TIMEOUT_USEC 0
+#define SERVER_TIMEOUT_SEC 0
+#define SERVER_TIMEOUT_USEC 500000  // microseconds
 
 static int breakloop = 0;	///< use this variable to stop your wait-loop. Occasionally check its value, !1 signals that the program should close
 
@@ -51,6 +51,8 @@ int receive_packet(fd_set *read_set, int server_fd, char **buffer, int buffer_si
     timeout.tv_sec  = sec;
     timeout.tv_usec = usec;
 
+    printf("sec: %lu, usec: %lu (%lu)\n", sec, usec, usec / 1000000);
+
     // Set a timeout for the packet
     FD_ZERO(read_set);
     FD_SET(server_fd, read_set);
@@ -58,10 +60,11 @@ int receive_packet(fd_set *read_set, int server_fd, char **buffer, int buffer_si
     nb = select(server_fd + 1, read_set, NULL, NULL, &timeout);
     if(nb < 0) {
         perror("Error waiting for timeout");
+        return -1;
     } else
     if(nb == 0) {
         printf("No reply, assuming that server is down\n");
-        return -1;
+        return 0;
     } else
     if(FD_ISSET(server_fd, read_set)) {
         bytesread = read(server_fd, buffer, buffer_size);
@@ -107,9 +110,10 @@ int main (int argc, char *argv [])
 	struct sockaddr_in server;
 	int bytesread;
 	char info_buffer[sizeof(struct audio_info)];
-	
+	long time_per_packet;   // Nanoseconds
+
 	signal( SIGINT, sigint_handler );	// trap Ctrl^C signals
-	
+
 	// parse arguments
 	if (argc < 3){
 		printf ("error : called with incorrect number of parameters\nusage : %s <server_name/IP> <filename> [<filter> [filter_options]]]\n", argv[0]) ;
@@ -179,12 +183,13 @@ int main (int argc, char *argv [])
         return -1;
     }
 
-    sample_size = info->sample_size;
-    sample_rate = info->sample_rate;
-    channels    = info->channels;
+    sample_size     = info->sample_size;
+    sample_rate     = info->sample_rate;
+    channels        = info->channels;
+    time_per_packet = info->time_per_packet;
 
     // TODO debug
-//    printf("sample_rate: %d, sample_size: %d, channels: %d\n", sample_rate, sample_size, channels);
+//    printf("sample_rate: %d, sample_size: %d, channels: %d, time_per_packet: %lu\n", sample_rate, sample_size, channels, time_per_packet);
 
 	// Open output
 	audio_fd = aud_writeinit(sample_rate, sample_size, channels);
@@ -216,9 +221,20 @@ int main (int argc, char *argv [])
     // TODO debug
     int i = 0;
 
-    bytesread = receive_packet(&read_set, server_fd, &buffer, BUFSIZE, SERVER_TIMEOUT_SEC, SERVER_TIMEOUT_USEC);
-    while (bytesread == BUFSIZE){
-        printf("Read %d bytes (packet %d\n", bytesread, i ++);
+    long packet_timeout_sec  = SERVER_TIMEOUT_SEC;
+    long packet_timeout_usec = SERVER_TIMEOUT_USEC + (time_per_packet / 1000);
+
+    printf("SERVER_TIMEOUT_USEC: %d, time_per_packet nanosec: %lu, time_per_packet / 1000: %lu\n", SERVER_TIMEOUT_USEC, time_per_packet, time_per_packet / 1000);
+    printf("packet_timeout_sec: %lu, packet_timeout_usec: %lu\n", packet_timeout_sec, packet_timeout_usec);
+
+
+    bytesread = receive_packet(&read_set, server_fd, &buffer, BUFSIZE, packet_timeout_sec, packet_timeout_usec);
+
+    while (bytesread == BUFSIZE || bytesread == 0){
+        if(bytesread == 0) {
+            printf("No reply, resetting timeout\n");
+        } else {
+            printf("Read %d bytes (packet %d\n", bytesread, i ++);
 
         // edit data in-place. Not necessarily the best option
 //        if (pfunc)
@@ -227,7 +243,8 @@ int main (int argc, char *argv [])
 
 //        gettimeofday(&start, NULL);
 
-        write(audio_fd, buffer, bytesread);
+            write(audio_fd, buffer, bytesread);
+        }
 
 //        gettimeofday(&end, NULL);
 //        rtt = (end.tv_sec - start.tv_sec);
@@ -236,7 +253,7 @@ int main (int argc, char *argv [])
 //            printf("That took %f seconds\n", rtt);
 
 //        bytesread = read(server_fd, buffer, BUFSIZE);
-        bytesread = receive_packet(&read_set, server_fd, &buffer, BUFSIZE, SERVER_TIMEOUT_SEC, SERVER_TIMEOUT_USEC);
+        bytesread = receive_packet(&read_set, server_fd, &buffer, BUFSIZE, packet_timeout_sec, packet_timeout_usec);
     }
 
     // If applicable, write the final bytes

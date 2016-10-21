@@ -1,9 +1,11 @@
 ### Custom ###
 *.wav
 *.tar
+alias*
 README
 client
 server
+issues
 
 ### C ###
 # Prerequisites

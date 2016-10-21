@@ -55,18 +55,20 @@ int nsleep(long nanoseconds) {
 ///
 /// @param fd an opened file descriptor for reading and writing
 /// @return returns 0 on success or a negative errorcode on failure
-int stream_data(int client_fd, struct sockaddr_in *client, char *filename)
+int stream_data(int client_fd, struct sockaddr_in *client, char *datafile)
 {
 	int data_fd, err;
 	int bytesread, bytesmod;
 	int channels, sample_size, sample_rate, bit_rate;
 	server_filterfunc pfunc;
-	char *datafile, *libfile;
-	char bufferfer[BUFSIZE];
+	char *libfile;
+	char buffer[BUFSIZE];
 	long time_per_packet;   // Nanoseconds
 	struct audio_info info;
 
-	datafile = strdup(filename);
+//	datafile = strdup(filename);
+
+//    printf("filename: %s (size: %d, len: %d) --- datafile: %s (size: %d, len: %d)\n", filename, sizeof(filename), strlen(filename), datafile, sizeof(datafile), strlen(datafile));
 
 	// TODO implement
 	libfile = NULL;
@@ -106,8 +108,9 @@ int stream_data(int client_fd, struct sockaddr_in *client, char *filename)
     info.sample_rate = sample_rate;
     info.sample_size = sample_size;
     info.channels = channels;
+    info.time_per_packet = time_per_packet;
     info.status = SUCCESS;
-    strncpy(info.filename, filename, FILENAME_MAX);
+    strncpy(info.filename, datafile, FILENAME_MAX);
 
     printf("Sending initial packet\n");
     err = sendto(client_fd, &info, sizeof(info), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
@@ -139,17 +142,20 @@ int stream_data(int client_fd, struct sockaddr_in *client, char *filename)
     int sent = 0;
     srand(time(NULL));
 
-    bytesread = read(data_fd, bufferfer, BUFSIZE);
+//    return 0;
+
+    bytesread = read(data_fd, buffer, BUFSIZE);
     while (bytesread > 0){
+        i = 0;
         // you might also want to check that the client is still active, whether it wants resends, etc..
 
         // edit data in-place. Not necessarily the best option
         if (pfunc)
-            bytesmod = pfunc(bufferfer,bytesread);
-//			write(client_fd, bufferfer, bytesmod);
+            bytesmod = pfunc(buffer,bytesread);
+//			write(client_fd, buffer, bytesmod);
 
         if(i % 2 == 0) {
-            err = sendto(client_fd, bufferfer, bytesread, 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
+            err = sendto(client_fd, buffer, bytesread, 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
             if(err < 0) {
                 perror("Error sending packet");
                 return 1;
@@ -165,9 +171,12 @@ int stream_data(int client_fd, struct sockaddr_in *client, char *filename)
 
         i ++;
 
-        nsleep(time_per_packet);
+        // Only sleep if this is not the final packet
+        if(bytesread == BUFSIZE) {
+            nsleep(time_per_packet);
+        }
 
-        bytesread = read(data_fd, bufferfer, BUFSIZE);
+        bytesread = read(data_fd, buffer, BUFSIZE);
     }
 
 	// TO IMPLEMENT : optionally close the connection gracefully 	
@@ -176,8 +185,8 @@ int stream_data(int client_fd, struct sockaddr_in *client, char *filename)
 //		close(client_fd);
 	if (data_fd >= 0)
 		close(data_fd);
-	if (datafile)
-		free(datafile);
+//	if (datafile)
+//		free(datafile);
 	if (libfile)
 		free(libfile);
 	
