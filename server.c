@@ -48,13 +48,14 @@ int nsleep(long nanoseconds) {
 }
 
 int verify_file_existence(char *datafile, int client_fd, struct sockaddr_in *client) {
+    int err;
     // Check for file existence
     if(access(datafile, F_OK) == -1) {
         struct audio_info info;
         info.status = FILE_NOT_FOUND;
 
         printf("Error: datafile not found, sending FILE_NOT_FOUND\n");
-        int err = sendto(client_fd, &info, sizeof(info), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
+        err = sendto(client_fd, &info, sizeof(info), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
         if(err < 0) {
             perror("Error sending initial packet");
         }
@@ -66,7 +67,9 @@ int verify_file_existence(char *datafile, int client_fd, struct sockaddr_in *cli
 }
 
 int open_input(char *datafile, int client_fd, struct sockaddr_in *client, int *sample_rate, int *sample_size, int *channels) {
-    int data_fd = aud_readinit(datafile, sample_rate, sample_size, channels);
+    int data_fd, err;
+
+     data_fd = aud_readinit(datafile, sample_rate, sample_size, channels);
     if (data_fd < 0) {
         struct audio_info info;
         info.status = FAILURE;
@@ -83,24 +86,35 @@ int open_input(char *datafile, int client_fd, struct sockaddr_in *client, int *s
     return data_fd;
 }
 
-int process_audio_info(int sample_size, int sample_rate, int channels, long *time_per_packet) {
+long calculate_time_per_packet(int sample_size, int sample_rate, int channels, int buffer_size) {
     float bit_rate = sample_size * sample_rate * channels;
+    return 8000000000 * ((float) buffer_size / (float) bit_rate); //453514720
+}
 
-    long local_time = 8000000000 * ((float) BUFSIZE / bit_rate);
-     printf("local time: %ld (BUFSIZE: %d)\n", local_time, BUFSIZE);
-     printf("bit_rate: %f\n", bit_rate);
+int send_audio_info(int client_fd, struct sockaddr_in *client, char *datafile, int sample_size, int sample_rate, int channels, long time_per_packet) {
+    int err;
+    struct audio_info info;
 
-     *time_per_packet = 8000000000 * ((float) BUFSIZE / (float) bit_rate);
+    info.sample_rate = sample_rate;
+    info.sample_size = sample_size;
+    info.channels = channels;
+    info.time_per_packet = time_per_packet;
+    info.status = SUCCESS;
+    strncpy(info.filename, datafile, strlen(datafile));
 
+    err = sendto(client_fd, &info, sizeof(info), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
+    if(err < 0) {
+        perror("Error sending initial packet");
+        return -1;
+    }
 
-     return 0;
+    return 0;
 }
 
 int process_request(int client_fd, struct sockaddr_in *client, char *datafile) {
     int data_fd, err;
-    int channels, sample_size, sample_rate, bit_rate;
+    int channels, sample_size, sample_rate;
     long time_per_packet;
-    struct audio_info info;
 
     err = verify_file_existence(datafile, client_fd, client);
     if(err < 0) {
@@ -112,102 +126,20 @@ int process_request(int client_fd, struct sockaddr_in *client, char *datafile) {
         return data_fd;
     }
 
-    process_audio_info(sample_size, sample_rate, channels, &time_per_packet);
+    time_per_packet = calculate_time_per_packet(sample_size, sample_rate, channels, BUFSIZE);
 
-    printf("process_request: time_per_packet = %ld (%d)\n", time_per_packet, time_per_packet / 1000000);
+    err = send_audio_info(client_fd, client, datafile, sample_size, sample_rate, channels, time_per_packet);
+    if(err < 0) {
+        return err;
+    }
 
-    return 0;
-
-    // Calculate audio info
-
-    bit_rate = sample_size * sample_rate * channels;
-    time_per_packet = 8000000000 * ((float) BUFSIZE / (float) bit_rate);
-
-    // create initial packet
-    info.sample_rate = sample_rate;
-    info.sample_size = sample_size;
-    info.channels = channels;
-    info.time_per_packet = time_per_packet;
-    info.status = SUCCESS;
-    strncpy(info.filename, datafile, FILENAME_MAX);
-
-//    printf("Sending initial packet\n");
-//    err = sendto(client_fd, &info, sizeof(info), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
-//    if(err < 0) {
-//        perror("Error sending initial packet");
-//        return -1;
-//    }
-
-    return 0; //stream_data(client_fd, data_fd, client, datafile);
+    return stream_data(client_fd, data_fd, client, datafile, time_per_packet);
 }
 
-// TODO documentation
-/// stream data to a client. 
-///
-/// This is an example function; you do *not* have to use this and can choose a different flow of control
-///
-/// @param fd an opened file descriptor for reading and writing
-/// @return returns 0 on success or a negative errorcode on failure
-int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, char *datafile)
+int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, char *datafile, long time_per_packet)
 {
-	int err;
-	int bytesread;
-	long time_per_packet;   // Nanoseconds
-
-
-//	server_filterfunc pfunc;
-//	char *libfile;
-//	char buffer[BUFSIZE];
-
-	// TODO implement
-//	libfile = NULL;
-
-//    err = verify_file_existence(datafile, client_fd, client);
-//    if(err < 0) {
-//        return err;
-//    }
-//
-//    data_fd = open_input(datafile, client_fd, client, &sample_rate, &sample_size, &channels);
-//    if(data_fd < 0) {
-//        return data_fd;
-//    }
-
-//    // Calculate audio info
-//	bit_rate = sample_size * sample_rate * channels;
-//	time_per_packet = 8000000000 * ((float) BUFSIZE / (float) bit_rate);
-
-//    // create initial packet
-//    info.sample_rate = sample_rate;
-//    info.sample_size = sample_size;
-//    info.channels = channels;
-//    info.time_per_packet = time_per_packet;
-//    info.status = SUCCESS;
-//    strncpy(info.filename, datafile, FILENAME_MAX);
-
-//    printf("Sending initial packet\n");
-//    err = sendto(client_fd, &info, sizeof(info), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
-//    if(err < 0) {
-//        perror("Error sending initial packet");
-//        return -1;
-//    }
-
-	// optionally open a library
-	/*if (libfile){
-		// try to open the library, if one is requested
-		pfunc = NULL;
-		if (!pfunc){
-			printf("failed to open the requested library. breaking hard\n");
-			return -1;
-		}
-		printf("opened libraryfile %s\n",libfile);
-	}
-	else{
-		pfunc = NULL;
-		printf("not using a filter\n");
-	}*/
-
-	return 0;
-
+	int audiobytesread, err;
+    struct audio_packet packet;
 
     // TODO debug
 //    printf("sample_rate: %d, sample_size: %d, channels: %d, bit_rate: %d\n", sample_rate, sample_size, channels, bit_rate);
@@ -217,20 +149,10 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, char *da
     int seqtemp = 0;
     srand(time(NULL));
 
-//    return 0;
 
-    struct audio_packet packet;
-
-    bytesread = read(data_fd, packet.buffer, BUFSIZE);
-    while (bytesread > 0){
+    audiobytesread = read(data_fd, packet.buffer, BUFSIZE);
+    while (audiobytesread > 0){
         i = 0;
-
-        // you might also want to check that the client is still active, whether it wants resends, etc..
-
-        // edit data in-place. Not necessarily the best option
-//        if (pfunc)
-//            bytesmod = pfunc(buffer,bytesread);
-//			write(client_fd, buffer, bytesmod);
 
         seqtemp = seq;
 
@@ -240,13 +162,13 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, char *da
 
         if(i % 2 == 0) {
             packet.seq = seq;
-            packet.audiobytesread = bytesread;
+            packet.audiobytesread = audiobytesread;
             err = sendto(client_fd, &packet, sizeof(struct audio_packet), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
             if(err < 0) {
                 perror("Error sending packet");
                 return 1;
             }
-            printf("Sent %d bytes of audio (packet number: %d)\n", bytesread, seq);
+            printf("Sent %d bytes of audio (packet number: %d)\n", audiobytesread, seq);
             printf("Sizeof(packet): %lu\n", sizeof(struct audio_packet));
             seq ++;
             seqtemp ++;
@@ -262,11 +184,11 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, char *da
         i ++;
 
         // Only sleep if this is not the final packet
-        if(bytesread == BUFSIZE) {
+        if(audiobytesread == BUFSIZE) {
             nsleep(time_per_packet);
         }
 
-        bytesread = read(data_fd, packet.buffer, BUFSIZE);
+        audiobytesread = read(data_fd, packet.buffer, BUFSIZE);
 
 //        return 0;
     }

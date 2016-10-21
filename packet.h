@@ -1,4 +1,4 @@
-#define BUFSIZE 8820
+#define BUFSIZE 5000
 #define PORT 12345
 #define FILESIZE_MAX 100
 
