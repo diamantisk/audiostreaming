@@ -37,7 +37,6 @@ int nsleep(long nanoseconds) {
     struct timespec req, rem;
 
     if(nanoseconds >= 1000000000) {
-        printf("More than a sec: %ld\n", nanoseconds);
         req.tv_sec = (int) (nanoseconds / 1000000000);
         req.tv_nsec = (nanoseconds - ((long) req.tv_sec * 1000000000));
     } else {
@@ -46,6 +45,25 @@ int nsleep(long nanoseconds) {
     }
 
     return nanosleep(&req, &rem);
+}
+
+int verify_file_existence(char *datafile, int client_fd, struct sockaddr_in *client) {
+    // Check for file existence
+    if(access(datafile, F_OK) == -1) {
+        struct audio_info info;
+        info.status = FILE_NOT_FOUND;
+
+        printf("sizeof sizeof(struct audio_info): %d\n", sizeof(info));
+        printf("Error: datafile not found, sending FILE_NOT_FOUND\n");
+        int err = sendto(client_fd, &info, sizeof(info), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
+        if(err < 0) {
+            perror("Error sending initial packet");
+        }
+
+        return -1;
+    }
+
+    return 0;
 }
 
 // TODO documentation
@@ -58,31 +76,20 @@ int nsleep(long nanoseconds) {
 int stream_data(int client_fd, struct sockaddr_in *client, char *datafile)
 {
 	int data_fd, err;
-	int bytesread; //, bytesmod;
+	int bytesread;
 	int channels, sample_size, sample_rate, bit_rate;
-//	server_filterfunc pfunc;
-	char *libfile;
-	char buffer[BUFSIZE];
 	long time_per_packet;   // Nanoseconds
 	struct audio_info info;
 
-//	datafile = strdup(filename);
-
-//    printf("filename: %s (size: %d, len: %d) --- datafile: %s (size: %d, len: %d)\n", filename, sizeof(filename), strlen(filename), datafile, sizeof(datafile), strlen(datafile));
+//	server_filterfunc pfunc;
+//	char *libfile;
+//	char buffer[BUFSIZE];
 
 	// TODO implement
-	libfile = NULL;
+//	libfile = NULL;
 
-    // Check for file existence
-    if(access(datafile, F_OK) == -1) {
-        info.status = FILE_NOT_FOUND;
-
-        printf("Error: datafile not found, sending FILE_NOT_FOUND\n");
-        err = sendto(client_fd, &info, sizeof(info), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
-        if(err < 0) {
-            perror("Error sending initial packet");
-        }
-
+    err = verify_file_existence(datafile, client_fd, client);
+    if(err < 0) {
         return -1;
     }
 
@@ -173,7 +180,7 @@ int stream_data(int client_fd, struct sockaddr_in *client, char *datafile)
                 return 1;
             }
             printf("Sent %d bytes of audio (packet number: %d)\n", bytesread, seq);
-            printf("Sizeof(packet): %d\n", sizeof(struct audio_packet));
+            printf("Sizeof(packet): %lu\n", sizeof(struct audio_packet));
             seq ++;
             seqtemp ++;
         } else {
@@ -205,8 +212,8 @@ int stream_data(int client_fd, struct sockaddr_in *client, char *datafile)
 		close(data_fd);
 //	if (datafile)
 //		free(datafile);
-	if (libfile)
-		free(libfile);
+//	if (libfile)
+//		free(libfile);
 	
 	return 0;
 }
@@ -224,6 +231,38 @@ void sigint_handler(int sigint)
 	}
 }
 
+/** Setup the server socket
+ *
+ * @param port      the port to bind
+ * @param flen      a pointer to an integer containing the size of from
+ * @param client    a structure where the source address of the datagram will be copied to
+ *
+ * @return  The socket identifier on succes, <0 otherwise
+ */
+int setup_socket(int port, socklen_t *flen, struct sockaddr_in *client) {
+    int client_fd, err;
+
+    client_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if(client_fd < 0) {
+        perror("Error initializing socket");
+        return -1;
+    }
+
+    client->sin_family = AF_INET;
+    client->sin_port = htons(port);
+    client->sin_addr.s_addr = htonl(INADDR_ANY);
+
+    *flen = sizeof(struct sockaddr_in);
+
+    err = bind(client_fd, (struct sockaddr *) client, sizeof(struct sockaddr_in));
+    if(err < 0) {
+        perror("Error binding socket");
+        return -1;
+    }
+
+    return client_fd;
+}
+
 /// the main loop, continuously waiting for clients
 int main (int argc, char **argv)
 {
@@ -235,27 +274,13 @@ int main (int argc, char **argv)
 	// TODO re-enable for submission
 //	 signal(SIGINT, sigint_handler );	// trap Ctrl^C signals
 
-    // Set up the client socket
-	client_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	if(client_fd < 0) {
-		perror("Error initializing socket");
-		return 1;
-	}
-
-	client.sin_family = AF_INET;
-	client.sin_port = htons(PORT);
-	client.sin_addr.s_addr = htonl(INADDR_ANY);
-
-	flen = sizeof(struct sockaddr_in);
-
-	err = bind(client_fd, (struct sockaddr *) &client, sizeof(struct sockaddr_in));
-	if(err < 0) {
-		perror("Error binding socket");
-		return 1;
-	}
+    client_fd = setup_socket(PORT, &flen, &client);
+    if(client_fd < 0) {
+        printf("Failed to set up socket\n");
+        return -1;
+    }
 	
 	while (!breakloop){
-
 	    // Wait for incoming messages
 		printf("Listening on port %d\n", PORT);
 		err = recvfrom(client_fd, buffer, FILENAME_MAX, 0, (struct sockaddr*) &client, &flen);

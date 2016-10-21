@@ -194,11 +194,12 @@ int main (int argc, char *argv [])
     if(FD_ISSET(server_fd, &read_set)) {
         bytesread = read(server_fd, info_buffer, BUFSIZE);
         // TODO debug
-//        printf("Received %d bytes: %s\n", bytesread, info_buffer);
+        printf("Received %d bytes: %s\n", bytesread, info_buffer);
     }
 
     // Parse the initial packet
     struct audio_info *info = (struct audio_info *) info_buffer;
+
     if(info->status == FILE_NOT_FOUND) {
         printf("Server responded: file not found\n");
         return -1;
