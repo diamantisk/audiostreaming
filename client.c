@@ -72,7 +72,7 @@ int receive_packet(fd_set *read_set, int server_fd, struct audio_packet *packet,
     if(FD_ISSET(server_fd, read_set)) {
         bytesread = read(server_fd, packet_buffer, sizeof(struct audio_packet));
         // TODO debug
-        printf("Received %d bytes\n", bytesread);
+//        printf("Received %d bytes\n", bytesread);
 
         // Cast the received buffer to a packet struct and copy the data to the original packet
         struct audio_packet *received_packet = (struct audio_packet *) packet_buffer;
@@ -250,10 +250,11 @@ int main (int argc, char *argv [])
     long packet_timeout_usec = SERVER_TIMEOUT_USEC + (time_per_packet / 1000);
     packet_timeouts = 0;
 
-    printf("SERVER_TIMEOUT_USEC: %d, time_per_packet nanosec: %lu, time_per_packet / 1000: %lu\n", SERVER_TIMEOUT_USEC, time_per_packet, time_per_packet / 1000);
-    printf("packet_timeout_sec: %lu, packet_timeout_usec: %lu\n", packet_timeout_sec, packet_timeout_usec);
+//    printf("SERVER_TIMEOUT_USEC: %d, time_per_packet nanosec: %lu, time_per_packet / 1000: %lu\n", SERVER_TIMEOUT_USEC, time_per_packet, time_per_packet / 1000);
+//    printf("packet_timeout_sec: %lu, packet_timeout_usec: %lu\n", packet_timeout_sec, packet_timeout_usec);
 
     struct audio_packet packet;
+    int seq_expected = 0;
 
     audiobytesread = receive_packet(&read_set, server_fd, &packet, packet_timeout_sec, packet_timeout_usec);
 
@@ -269,7 +270,12 @@ int main (int argc, char *argv [])
             printf("Waiting for reply (%d)...\n", packet_timeouts);
             packet_timeouts ++;
         } else {
-            printf("Read %d audio bytes (packet %d)\n", packet.audiobytesread, packet.seq);
+//            printf("Read %d audio bytes (packet %d)\n", packet.audiobytesread, packet.seq);
+            if(packet.seq == seq_expected) {
+                write(audio_fd, packet.buffer, audiobytesread);
+            } else {
+                printf("Wrong packet, expected %d but received %d\n", seq_expected, packet.seq);
+            }
 
 //            printf("main buffer: %s\n", packet.buffer);
 
@@ -282,8 +288,6 @@ int main (int argc, char *argv [])
 
             printf("Sizeof(packet.buffer): %d\n", sizeof(packet.buffer));
 
-            write(audio_fd, packet.buffer, audiobytesread);
-
 //            return 0;
         }
 
@@ -294,6 +298,8 @@ int main (int argc, char *argv [])
 //            printf("That took %f seconds\n", rtt);
 
 //        bytesread = read(server_fd, buffer, BUFSIZE);
+
+        seq_expected ++;
         audiobytesread = receive_packet(&read_set, server_fd, &packet, packet_timeout_sec, packet_timeout_usec);
     }
 

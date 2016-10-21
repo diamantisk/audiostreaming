@@ -139,7 +139,8 @@ int stream_data(int client_fd, struct sockaddr_in *client, char *datafile)
     printf("sample_rate: %d, sample_size: %d, channels: %d, bit_rate: %d\n", sample_rate, sample_size, channels, bit_rate);
     printf("time_per_packet: %ld nanoseconds (%f seconds)\n", time_per_packet, (float) time_per_packet / 1000000000);
     int i = 0;
-    int sent = 100;
+    int seq = 0;
+    int seqtemp = 0;
     srand(time(NULL));
 
 //    return 0;
@@ -149,6 +150,7 @@ int stream_data(int client_fd, struct sockaddr_in *client, char *datafile)
     bytesread = read(data_fd, packet.buffer, BUFSIZE);
     while (bytesread > 0){
         i = 0;
+
         // you might also want to check that the client is still active, whether it wants resends, etc..
 
         // edit data in-place. Not necessarily the best option
@@ -156,23 +158,32 @@ int stream_data(int client_fd, struct sockaddr_in *client, char *datafile)
 //            bytesmod = pfunc(buffer,bytesread);
 //			write(client_fd, buffer, bytesmod);
 
+        seqtemp = seq;
+
+        if(seq % 5 == 4) {
+            seq = 1337;
+        }
+
         if(i % 2 == 0) {
-            packet.seq = sent;
+            packet.seq = seq;
             packet.audiobytesread = bytesread;
             err = sendto(client_fd, &packet, sizeof(struct audio_packet), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
             if(err < 0) {
                 perror("Error sending packet");
                 return 1;
             }
-            printf("Sent %d bytes of audio (packet number: %d)\n", bytesread, sent);
+            printf("Sent %d bytes of audio (packet number: %d)\n", bytesread, seq);
             printf("Sizeof(packet): %d\n", sizeof(struct audio_packet));
-            sent ++;
+            seq ++;
+            seqtemp ++;
         } else {
             float usleep = (rand() / (float) RAND_MAX);
             long lsleep = 400000000 * usleep;
 //            printf("Skipping... rand: %ld\n", lsleep);
             nsleep(lsleep);
         }
+
+        seq = seqtemp;
 
         i ++;
 
