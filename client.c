@@ -26,6 +26,7 @@
 
 #define SERVER_TIMEOUT_SEC 0
 #define SERVER_TIMEOUT_USEC 500000  // microseconds
+#define SERVER_TIMEOUT_THRESHOLD 5
 
 static int breakloop = 0;	///< use this variable to stop your wait-loop. Occasionally check its value, !1 signals that the program should close
 
@@ -44,14 +45,16 @@ void sigint_handler(int sigint)
 	}
 }
 
-int receive_packet(fd_set *read_set, int server_fd, char **buffer, int buffer_size, long sec, long usec) {
+int receive_packet(fd_set *read_set, int server_fd, struct audio_packet *packet, long sec, long usec) {
     int bytesread, nb;
     struct timeval timeout;
+    char packet_buffer[sizeof(struct audio_packet)];
 
     timeout.tv_sec  = sec;
     timeout.tv_usec = usec;
 
-    printf("sec: %lu, usec: %lu (%lu)\n", sec, usec, usec / 1000000);
+    // TODO debug
+//    printf("sec: %lu, usec: %lu (%lu)\n", sec, usec, usec / 1000000);
 
     // Set a timeout for the packet
     FD_ZERO(read_set);
@@ -63,13 +66,35 @@ int receive_packet(fd_set *read_set, int server_fd, char **buffer, int buffer_si
         return -1;
     } else
     if(nb == 0) {
-        printf("No reply, assuming that server is down\n");
+//        printf("No reply, assuming that server is down\n");
         return 0;
     } else
     if(FD_ISSET(server_fd, read_set)) {
-        bytesread = read(server_fd, buffer, buffer_size);
+        bytesread = read(server_fd, packet_buffer, sizeof(struct audio_packet));
         // TODO debug
-//         printf("Received %d bytes\n", bytesread);
+        printf("Received %d bytes\n", bytesread);
+
+        // Cast the received buffer to a packet struct and copy the data to the original packet
+        struct audio_packet *received_packet = (struct audio_packet *) packet_buffer;
+        packet->seq = received_packet->seq;
+        packet->audiobytesread = received_packet->audiobytesread;
+        memcpy(packet->buffer, received_packet->buffer, packet->audiobytesread);
+
+        return packet->audiobytesread;
+
+//        int eq = memcmp(packet->buffer, received_packet->buffer, packet->bytesread);
+//        printf("Buffers are %s (%d)", (eq == 0) ? "equal" : "NOT equal", eq);
+
+//         printf("received buffer: %s\n", received_packet->buffer);
+//         printf("copied buffer: %s\n", packet->buffer);
+
+//         printf("Packet number copied: %d\n", packet->seq);
+
+
+//         packet->seq = received_packet->seq;
+//         packet->bytesread = received_packet->bytesread;
+//         strncpy(packet->buffer, received_packet->buffer, received_packet->bytesread);
+
     }
 
     return bytesread;
@@ -108,7 +133,7 @@ int main (int argc, char *argv [])
 //	double rtt;
 	char *ip;
 	struct sockaddr_in server;
-	int bytesread;
+	int bytesread, packetbytesread, audiobytesread, packet_timeouts;
 	char info_buffer[sizeof(struct audio_info)];
 	long time_per_packet;   // Nanoseconds
 
@@ -223,18 +248,30 @@ int main (int argc, char *argv [])
 
     long packet_timeout_sec  = SERVER_TIMEOUT_SEC;
     long packet_timeout_usec = SERVER_TIMEOUT_USEC + (time_per_packet / 1000);
+    packet_timeouts = 0;
 
     printf("SERVER_TIMEOUT_USEC: %d, time_per_packet nanosec: %lu, time_per_packet / 1000: %lu\n", SERVER_TIMEOUT_USEC, time_per_packet, time_per_packet / 1000);
     printf("packet_timeout_sec: %lu, packet_timeout_usec: %lu\n", packet_timeout_sec, packet_timeout_usec);
 
+    struct audio_packet packet;
 
-    bytesread = receive_packet(&read_set, server_fd, &buffer, BUFSIZE, packet_timeout_sec, packet_timeout_usec);
+    audiobytesread = receive_packet(&read_set, server_fd, &packet, packet_timeout_sec, packet_timeout_usec);
 
-    while (bytesread == BUFSIZE || bytesread == 0){
-        if(bytesread == 0) {
-            printf("No reply, resetting timeout\n");
+//    printf("Packet number main: %d\n", packet.seq);
+//    printf("Packet buffer main: %s\n", packet.buffer);
+
+    while (audiobytesread == BUFSIZE || audiobytesread == 0){
+        if(audiobytesread == 0) {
+            if(packet_timeouts == SERVER_TIMEOUT_THRESHOLD) {
+                printf("Too many timeouts, aborting\n");
+                return -1;
+            }
+            printf("Waiting for reply (%d)...\n", packet_timeouts);
+            packet_timeouts ++;
         } else {
-            printf("Read %d bytes (packet %d\n", bytesread, i ++);
+            printf("Read %d audio bytes (packet %d)\n", packet.audiobytesread, packet.seq);
+
+//            printf("main buffer: %s\n", packet.buffer);
 
         // edit data in-place. Not necessarily the best option
 //        if (pfunc)
@@ -243,7 +280,11 @@ int main (int argc, char *argv [])
 
 //        gettimeofday(&start, NULL);
 
-            write(audio_fd, buffer, bytesread);
+            printf("Sizeof(packet.buffer): %d\n", sizeof(packet.buffer));
+
+            write(audio_fd, packet.buffer, audiobytesread);
+
+//            return 0;
         }
 
 //        gettimeofday(&end, NULL);
@@ -253,14 +294,14 @@ int main (int argc, char *argv [])
 //            printf("That took %f seconds\n", rtt);
 
 //        bytesread = read(server_fd, buffer, BUFSIZE);
-        bytesread = receive_packet(&read_set, server_fd, &buffer, BUFSIZE, packet_timeout_sec, packet_timeout_usec);
+        audiobytesread = receive_packet(&read_set, server_fd, &packet, packet_timeout_sec, packet_timeout_usec);
     }
 
     // If applicable, write the final bytes
     if(bytesread > 0) {
         // TODO debug
-        printf("Read %d bytes (last packet)\n", bytesread);
-        write(audio_fd, buffer, bytesread);
+        printf("Read %d audio bytes (packet %d)\n", packet.audiobytesread, packet.seq);
+        write(audio_fd, packet.buffer, audiobytesread);
     }
 
 	printf("Done\n");

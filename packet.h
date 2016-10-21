@@ -11,7 +11,8 @@ struct __attribute__((packed)) audio_info {
     enum flag {SUCCESS, FILE_NOT_FOUND, FAILURE} status;
 };
 
-struct __attribute__((packed)) packet {
+struct __attribute__((packed)) audio_packet {
     int seq;
+    int audiobytesread;
     char buffer[BUFSIZE];
 };

@@ -58,9 +58,9 @@ int nsleep(long nanoseconds) {
 int stream_data(int client_fd, struct sockaddr_in *client, char *datafile)
 {
 	int data_fd, err;
-	int bytesread, bytesmod;
+	int bytesread; //, bytesmod;
 	int channels, sample_size, sample_rate, bit_rate;
-	server_filterfunc pfunc;
+//	server_filterfunc pfunc;
 	char *libfile;
 	char buffer[BUFSIZE];
 	long time_per_packet;   // Nanoseconds
@@ -139,29 +139,34 @@ int stream_data(int client_fd, struct sockaddr_in *client, char *datafile)
     printf("sample_rate: %d, sample_size: %d, channels: %d, bit_rate: %d\n", sample_rate, sample_size, channels, bit_rate);
     printf("time_per_packet: %ld nanoseconds (%f seconds)\n", time_per_packet, (float) time_per_packet / 1000000000);
     int i = 0;
-    int sent = 0;
+    int sent = 100;
     srand(time(NULL));
 
 //    return 0;
 
-    bytesread = read(data_fd, buffer, BUFSIZE);
+    struct audio_packet packet;
+
+    bytesread = read(data_fd, packet.buffer, BUFSIZE);
     while (bytesread > 0){
         i = 0;
         // you might also want to check that the client is still active, whether it wants resends, etc..
 
         // edit data in-place. Not necessarily the best option
-        if (pfunc)
-            bytesmod = pfunc(buffer,bytesread);
+//        if (pfunc)
+//            bytesmod = pfunc(buffer,bytesread);
 //			write(client_fd, buffer, bytesmod);
 
         if(i % 2 == 0) {
-            err = sendto(client_fd, buffer, bytesread, 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
+            packet.seq = sent;
+            packet.audiobytesread = bytesread;
+            err = sendto(client_fd, &packet, sizeof(struct audio_packet), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
             if(err < 0) {
                 perror("Error sending packet");
                 return 1;
             }
+            printf("Sent %d bytes of audio (packet number: %d)\n", bytesread, sent);
+            printf("Sizeof(packet): %d\n", sizeof(struct audio_packet));
             sent ++;
-            printf("Sent %d bytes (packet number: %d)\n", bytesread, sent);
         } else {
             float usleep = (rand() / (float) RAND_MAX);
             long lsleep = 400000000 * usleep;
@@ -176,7 +181,9 @@ int stream_data(int client_fd, struct sockaddr_in *client, char *datafile)
             nsleep(time_per_packet);
         }
 
-        bytesread = read(data_fd, buffer, BUFSIZE);
+        bytesread = read(data_fd, packet.buffer, BUFSIZE);
+
+//        return 0;
     }
 
 	// TO IMPLEMENT : optionally close the connection gracefully 	
