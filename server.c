@@ -157,7 +157,7 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, char *da
         seqtemp = seq;
 
         if(seq % 5 == 4) {
-            seq = 1337;
+//            seq = 1337;
         }
 
         if(i % 2 == 0) {
@@ -169,7 +169,6 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, char *da
                 return 1;
             }
             printf("Sent %d bytes of audio (packet number: %d)\n", audiobytesread, seq);
-            printf("Sizeof(packet): %lu\n", sizeof(struct audio_packet));
             seq ++;
             seqtemp ++;
         } else {
