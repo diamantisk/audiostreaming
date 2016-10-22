@@ -84,6 +84,9 @@ int receive_packet(fd_set *read_set, int server_fd, struct audio_packet *packet,
         memcpy(packet->buffer, received_packet->buffer, packet->audiobytesread);
 
         return packet->audiobytesread;
+    } else {
+        printf("Failed to process timeout result\n");
+        return -1;
     }
 }
 
@@ -290,11 +293,8 @@ int parse_stream(int server_fd, int audio_fd, int time_per_packet) {
 int main (int argc, char *argv [])
 {
 	int server_fd, audio_fd, err;
-	fd_set read_set;
 	char *ip;
 	struct sockaddr_in server;
-	int bytesread, audiobytesread, packet_timeouts;
-	long time_per_packet;   // Nanoseconds
 	struct audio_info info;
 
     // TODO re-enable for submission
@@ -352,7 +352,7 @@ int main (int argc, char *argv [])
 		printf("Not using a filter\n");
 	}*/
 
-	err = parse_stream(server_fd, audio_fd, time_per_packet);
+	err = parse_stream(server_fd, audio_fd, info.time_per_packet);
     if(err < 0) {
         printf("Failed to parse stream\n");
         return -1;

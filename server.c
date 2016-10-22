@@ -47,6 +47,14 @@ int nsleep(long nanoseconds) {
     return nanosleep(&req, &rem);
 }
 
+/** Verify whether a file exists on disk and send an error packet in case it does not
+ *
+ * @param datafile  the name of the datafile
+ * @param client_fd  the client descriptor
+ * @param client  the client socket
+ *
+ * @return  0 on success, or -1 in case of an interrupt
+ */
 int verify_file_existence(char *datafile, int client_fd, struct sockaddr_in *client) {
     int err;
     // Check for file existence
@@ -66,6 +74,17 @@ int verify_file_existence(char *datafile, int client_fd, struct sockaddr_in *cli
     return 0;
 }
 
+/** Open the input file
+ *
+ * @param datafile  the name of the datafile
+ * @param client_fd  the client descriptor
+ * @param client  the client socket
+ * @param sample_rate  a pointer to an int which stores the sample rate
+ * @param sample_size  a pointer to an int which stores the sample size
+ * @param channels  a pointer to an int which stores the number of channels
+ *
+ * @return  0 on success, or -1 in case of an interrupt
+ */
 int open_input(char *datafile, int client_fd, struct sockaddr_in *client, int *sample_rate, int *sample_size, int *channels) {
     int data_fd, err;
 
@@ -75,7 +94,7 @@ int open_input(char *datafile, int client_fd, struct sockaddr_in *client, int *s
         info.status = FAILURE;
 
         printf("Error: failed to open input, sending FAILURE\n");
-        int err = sendto(client_fd, &info, sizeof(info), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
+        err = sendto(client_fd, &info, sizeof(info), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
         if(err < 0) {
             perror("Error sending initial packet");
         }
@@ -86,11 +105,32 @@ int open_input(char *datafile, int client_fd, struct sockaddr_in *client, int *s
     return data_fd;
 }
 
+/** Calculate the time required to write a packet to audio
+ *
+ * @param sample_size   the sample size
+ * @param sample_rate   the sample rate
+ * @param channels   the number of channels
+ * @param buffer_size   the size of the buffer in the packet
+ *
+ * @return  the time required to write a packet to audio
+ */
 long calculate_time_per_packet(int sample_size, int sample_rate, int channels, int buffer_size) {
     float bit_rate = sample_size * sample_rate * channels;
     return 8000000000 * ((float) buffer_size / (float) bit_rate); //453514720
 }
 
+/** Send an audio info packet to the client
+ *
+ * @param client_fd  the client descriptor
+ * @param client  the client socket
+ * @param datafile  the name of the datafile
+ * @param sample_size   the sample size
+ * @param sample_rate   the sample rate
+ * @param channels   the number of channels
+ * @param time_per_packet   the time required to write a packet to audio
+ *
+ * @return  0 on success, <0 otherwise
+ */
 int send_audio_info(int client_fd, struct sockaddr_in *client, char *datafile, int sample_size, int sample_rate, int channels, long time_per_packet) {
     int err;
     struct audio_info info;
@@ -111,31 +151,16 @@ int send_audio_info(int client_fd, struct sockaddr_in *client, char *datafile, i
     return 0;
 }
 
-int process_request(int client_fd, struct sockaddr_in *client, char *datafile) {
-    int data_fd, err;
-    int channels, sample_size, sample_rate;
-    long time_per_packet;
-
-    err = verify_file_existence(datafile, client_fd, client);
-    if(err < 0) {
-        return err;
-    }
-
-    data_fd = open_input(datafile, client_fd, client, &sample_rate, &sample_size, &channels);
-    if(data_fd < 0) {
-        return data_fd;
-    }
-
-    time_per_packet = calculate_time_per_packet(sample_size, sample_rate, channels, BUFSIZE);
-
-    err = send_audio_info(client_fd, client, datafile, sample_size, sample_rate, channels, time_per_packet);
-    if(err < 0) {
-        return err;
-    }
-
-    return stream_data(client_fd, data_fd, client, datafile, time_per_packet);
-}
-
+/** Stream audio packets to the client
+ *
+ * @param client_fd  the client descriptor
+ * @param audio_fd  the audio descriptor
+ * @param client  the client socket
+ * @param datafile  the name of the datafile
+ * @param time_per_packet   the time required to write a packet to audio
+ *
+ * @return  0 on success, <0 otherwise
+ */
 int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, char *datafile, long time_per_packet)
 {
 	int audiobytesread, err;
@@ -192,8 +217,8 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, char *da
 //        return 0;
     }
 
-	// TO IMPLEMENT : optionally close the connection gracefully 	
-	
+	// TO IMPLEMENT : optionally close the connection gracefully
+
 //	if (client_fd >= 0)
 //		close(client_fd);
 	if (data_fd >= 0)
@@ -202,8 +227,41 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, char *da
 //		free(datafile);
 //	if (libfile)
 //		free(libfile);
-	
+
 	return 0;
+}
+
+/** Process a request made by a client
+ *
+ * @param client_fd  the client descriptor
+ * @param client  the client socket
+ * @param datafile  the name of the datafile
+ *
+ * @return  0 on success, <0 otherwise
+ */
+int process_request(int client_fd, struct sockaddr_in *client, char *datafile) {
+    int data_fd, err;
+    int channels, sample_size, sample_rate;
+    long time_per_packet;
+
+    err = verify_file_existence(datafile, client_fd, client);
+    if(err < 0) {
+        return err;
+    }
+
+    data_fd = open_input(datafile, client_fd, client, &sample_rate, &sample_size, &channels);
+    if(data_fd < 0) {
+        return data_fd;
+    }
+
+    time_per_packet = calculate_time_per_packet(sample_size, sample_rate, channels, BUFSIZE);
+
+    err = send_audio_info(client_fd, client, datafile, sample_size, sample_rate, channels, time_per_packet);
+    if(err < 0) {
+        return err;
+    }
+
+    return stream_data(client_fd, data_fd, client, datafile, time_per_packet);
 }
 
 /// unimportant: the signal handler. This function gets called when Ctrl^C is pressed
