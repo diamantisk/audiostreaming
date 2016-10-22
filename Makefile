@@ -22,10 +22,10 @@ LIBS = libblank.so
 all : client server ${LIBS}
 
 client : client.o audio.o packet.o
-	${CC} ${CFLAGS} -o $@ $+
+	${CC} ${CFLAGS} -o $@ $+ ${LDFLAGS}
 
 server : server.o audio.o packet.o
-	${CC} ${CFLAGS} -o $@ $+
+	${CC} ${CFLAGS} -o $@ $+ ${LDFLAGS}
 
 distclean : clean
 	rm -f server client *.so

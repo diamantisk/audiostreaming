@@ -21,4 +21,3 @@ typedef int (*server_filterfunc)(char *, int);
 //
 // there is NO reason to stick to this typedef
 typedef char * (*client_filterfunc)(char *, int, int*);
-

@@ -15,6 +15,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <time.h>
+#include <dlfcn.h>
 
 #include "library.h"
 #include "audio.h"
@@ -231,6 +232,26 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, char *da
 	return 0;
 }
 
+/** Open a request made by a client and store the info in a request packet
+ *
+ * @param request_buffer    the buffer received from the request
+ * @param request   a pointer to the request packet to store the data in
+ */
+void open_request(char *request_buffer, struct request_packet *request) {
+    struct request_packet *received = (struct request_packet *) request_buffer;
+
+    strncpy(request->filename, received->filename, strlen(received->filename));
+    request->filename[strlen(received->filename)] = '\0';
+
+    printf("[open_request] filename: %s\n", request->filename);
+
+    strncpy(request->libname, received->libname, strlen(received->libname));
+    request->libname[strlen(received->libname)] = '\0';
+
+    strncpy(request->libarg, received->libarg, strlen(received->libarg));
+    request->libarg[strlen(received->libarg)] = '\0';
+}
+
 /** Process a request made by a client
  *
  * @param client_fd  the client descriptor
@@ -239,29 +260,29 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, char *da
  *
  * @return  0 on success, <0 otherwise
  */
-int process_request(int client_fd, struct sockaddr_in *client, char *datafile) {
+int process_request(int client_fd, struct sockaddr_in *client, struct request_packet *request) {
     int data_fd, err;
     int channels, sample_size, sample_rate;
     long time_per_packet;
 
-    err = verify_file_existence(datafile, client_fd, client);
+    err = verify_file_existence(request->filename, client_fd, client);
     if(err < 0) {
         return err;
     }
 
-    data_fd = open_input(datafile, client_fd, client, &sample_rate, &sample_size, &channels);
+    data_fd = open_input(request->filename, client_fd, client, &sample_rate, &sample_size, &channels);
     if(data_fd < 0) {
         return data_fd;
     }
 
     time_per_packet = calculate_time_per_packet(sample_size, sample_rate, channels, BUFSIZE);
 
-    err = send_audio_info(client_fd, client, datafile, sample_size, sample_rate, channels, time_per_packet);
+    err = send_audio_info(client_fd, client, request->filename, sample_size, sample_rate, channels, time_per_packet);
     if(err < 0) {
         return err;
     }
 
-    return stream_data(client_fd, data_fd, client, datafile, time_per_packet);
+    return stream_data(client_fd, data_fd, client, request->filename, time_per_packet);
 }
 
 /// unimportant: the signal handler. This function gets called when Ctrl^C is pressed
@@ -313,12 +334,47 @@ int setup_socket(int port, socklen_t *flen, struct sockaddr_in *client) {
 int main (int argc, char **argv)
 {
 	int client_fd, err;
-	char buffer[FILENAME_MAX];
+	char request_buffer[sizeof(struct request_packet)];
 	socklen_t flen;
 	struct sockaddr_in client;
 	
 	// TODO re-enable for submission
 //	 signal(SIGINT, sigint_handler );	// trap Ctrl^C signals
+
+    // lib stuff, it works
+    /*char *libfile = "/home/thomas/Documents/sysprog/assignment4/libblank.so";
+    void *mylibrary;
+    server_filterfunc pfunc;
+
+    // optionally open a library
+    if (libfile){
+        // try to open the library, if one is requested
+        pfunc = NULL;
+
+        mylibrary = dlopen(libfile, RTLD_NOW);
+        if(mylibrary == NULL) {
+            printf("Failed to load library: %s\n", dlerror());
+            return -1;
+        }
+
+        pfunc = dlsym(mylibrary, "encode");
+
+        if (pfunc == NULL){
+            printf("Failed to load symbol: %s\n", dlerror());
+            return -1;
+        }
+
+        printf("opened libraryfile %s\n",libfile);
+
+        int result = pfunc("hi", 10);
+        dlclose(mylibrary);
+    }
+    else{
+        pfunc = NULL;
+        printf("not using a filter\n");
+    }
+
+    return 0;*/
 
     client_fd = setup_socket(PORT, &flen, &client);
     if(client_fd < 0) {
@@ -326,27 +382,30 @@ int main (int argc, char **argv)
         return -1;
     }
 	
-	while (!breakloop){
+	while (!breakloop) {
+
+	    struct request_packet request;
 	    // Wait for incoming messages
 		printf("Listening on port %d\n", PORT);
-		err = recvfrom(client_fd, buffer, FILENAME_MAX, 0, (struct sockaddr*) &client, &flen);
+		err = recvfrom(client_fd, request_buffer, FILENAME_MAX, 0, (struct sockaddr*) &client, &flen);
 		if(err < 0) {
 			perror("Error receiving packet");
 			return -1;
 		}
 
-        // Store the filename
-		char filename[err + 1];
-        strncpy(filename, buffer, err);
-        filename[err] = '\0';
-
         // Print a recognizable start and end of the streaming progress to stdout
-        printf("^^^^ Request received - %s:%d - %s ^^^^\n", inet_ntoa(client.sin_addr), ntohs(client.sin_port), filename);
-//		err = stream_data(client_fd, &client, filename);
-        err = process_request(client_fd, &client, filename);
-		printf("---- Request processed - %s:%d - %s - ", inet_ntoa(client.sin_addr), ntohs(client.sin_port), filename);
+        printf("^^^^ Request received from %s:%d ^^^^\n", inet_ntoa(client.sin_addr), ntohs(client.sin_port));
+
+        open_request(request_buffer, &request);
+        err = process_request(client_fd, &client, request_buffer);
+
+		printf("---- Request processed from %s:%d: ", inet_ntoa(client.sin_addr), ntohs(client.sin_port));
 		(err == 0) ? (printf("Success")) : (printf("Failure"));
 		printf(" ----\n");
+
+         printf("[main] filename: %s (%ld)\n", request.filename, strlen(request.filename));
+         printf("[main] libname: %s (%ld)\n", request.libname, strlen(request.libname));
+         printf("[main] libarg: %s (%ld)\n", request.libarg, strlen(request.libarg));
 	}
 
 	return 0;

@@ -18,11 +18,13 @@ void _init()
 
 int encode(char* buffer, int bufferlen)
 {
+    printf("encoding\n");
 	return bufferlen;
 }
 
 char *decode(char* buffer, int bufferlen, int *outbufferlen)
-{  
+{
+    printf("decoding\n");
 	*outbufferlen = bufferlen;
 	return buffer;
 }

@@ -4,6 +4,7 @@
 #define BUFSIZE 5000
 #define PORT 12345
 #define FILESIZE_MAX 100
+#define NONE "none"
 
 //extern int PORT, BUFSIZE, FILESIZE_MAX;
 
@@ -14,6 +15,12 @@ struct __attribute__((packed)) audio_info {
     long time_per_packet;   // Nanoseconds
     char filename[FILESIZE_MAX];
     enum flag {SUCCESS, FILE_NOT_FOUND, FAILURE} status;
+};
+
+struct __attribute__((packed)) request_packet {
+    char filename[FILESIZE_MAX];
+    char libname[FILESIZE_MAX];
+    char libarg[FILESIZE_MAX];
 };
 
 struct __attribute__((packed)) audio_packet {

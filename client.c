@@ -190,52 +190,6 @@ int receive_audio_info(int server_fd, char *info_buffer) {
     return bytesread;
 }
 
-/** Request the server to initialize a streaming session for a file
- * @param server_fd the server descriptor
- * @param server    the server socket identifier
- * @param filename  the filename to request
- * @param info      the audio info packet to store the data in
- *
- * @return 0 on success, <0 otherwise
- */
-int request_file(int server_fd, struct sockaddr_in *server, char *filename, struct audio_info *info) {
-    int err;
-    char info_buffer[sizeof(struct audio_info)];
-    struct audio_info *received;
-
-    err = sendto(server_fd, filename, strlen(filename), 0, (struct sockaddr*) server, sizeof(struct sockaddr_in));
-    if(err < 0) {
-        perror("Error sending packet");
-        return -1;
-    }
-
-    err = receive_audio_info(server_fd, info_buffer);
-    if(err < 0) {
-        return err;
-    }
-
-    received = (struct audio_info *) info_buffer;
-
-    if(received->status == FILE_NOT_FOUND) {
-        printf("Server responded: file not found\n");
-        return -1;
-    } else
-    if(received->status == FAILURE) {
-        printf("Server responded: failure\n");
-        return -1;
-    }
-
-    // Copy the received data to the info struct
-    info->sample_size = received->sample_size;
-    info->sample_rate = received->sample_rate;
-    info->channels = received->channels;
-    info->time_per_packet = received->time_per_packet;
-    info->status = received->status;
-    strncpy(info->filename, received->filename, strlen(received->filename));
-
-    return 0;
-}
-
 /** Receive data packets from the stream and write them to audio
  * @param server_fd the server descriptor
  * @param audio_fd  the audio descriptor
@@ -290,27 +244,120 @@ int parse_stream(int server_fd, int audio_fd, int time_per_packet) {
     return 0;
 }
 
+/** Request the server to initialize a streaming session for a file
+ * @param server_fd the server descriptor
+ * @param server    the server socket identifier
+ * @param filename  the filename to request
+ * @param info      the audio info packet to store the data in
+ *
+ * @return 0 on success, <0 otherwise
+ */
+int send_request(int server_fd, struct sockaddr_in *server, struct request_packet *request, struct audio_info *info) {
+    int err;
+    char info_buffer[sizeof(struct audio_info)];
+    struct audio_info *received;
+
+    printf("Sent %ld bytes\n", sizeof(struct request_packet));
+    printf("libarg: %s (%d)\n", request->libarg, strlen(request->libarg));
+    printf("filename: %s\n", request->filename);
+    err = sendto(server_fd, request, sizeof(struct request_packet), 0, (struct sockaddr*) server, sizeof(struct sockaddr_in));
+    if(err < 0) {
+        perror("Error sending packet");
+        return -1;
+    }
+
+    err = receive_audio_info(server_fd, info_buffer);
+    if(err < 0) {
+        return err;
+    }
+
+    received = (struct audio_info *) info_buffer;
+
+    if(received->status == FILE_NOT_FOUND) {
+        printf("Server responded: file not found\n");
+        return -1;
+    } else
+    if(received->status == FAILURE) {
+        printf("Server responded: failure\n");
+        return -1;
+    }
+
+    // Copy the received data to the info struct
+    info->sample_size = received->sample_size;
+    info->sample_rate = received->sample_rate;
+    info->channels = received->channels;
+    info->time_per_packet = received->time_per_packet;
+    info->status = received->status;
+    strncpy(info->filename, received->filename, strlen(received->filename));
+
+    return 0;
+}
+
+/** Create a request packet to send to the server
+ * @param argc  the amount of command line arguments
+ * @param argv  the string array of arguments
+ * @param request   a pointer to the request packet
+ *
+ * @return 0 on success, <0 otherwise
+ */
+int create_request (int argc, char **argv, struct request_packet *request) {
+    printf("Request with %d values\n", argc);
+
+    if(strlen(argv[2]) > FILESIZE_MAX) {
+        printf("Filename is too long, max %d characters\n", FILESIZE_MAX);
+        return -1;
+    }
+
+    if(argc > 3 && strlen(argv[3]) > FILESIZE_MAX) {
+        printf("Library filename is too long, max %d characters\n", FILESIZE_MAX);
+        return -1;
+    }
+
+    strncpy(request->filename, argv[2], strlen(argv[2]) + 1);
+    request->filename[strlen(argv[2]) + 1] = '\0';
+
+    if(argc > 3) {
+        strncpy(request->libname, argv[3], strlen(argv[3]) + 1);
+        request->libname[strlen(argv[3]) + 1] = '\0';
+    } else {
+        printf("no libname\n");
+        strncpy(request->libname, NONE, strlen(NONE));
+        request->libname[strlen(NONE)] = '\0';
+    }
+
+    if(argc > 4) {
+        strncpy(request->libarg, argv[4], strlen(argv[4]) + 1);
+        request->libarg[strlen(argv[4]) + 1] = '\0';
+    } else {
+        printf("no libargs\n");
+        strncpy(request->libarg, NONE, strlen(NONE));
+        request->libarg[strlen(NONE)] = '\0';
+    }
+
+    return 0;
+}
+
 int main (int argc, char *argv [])
 {
 	int server_fd, audio_fd, err;
 	char *ip;
 	struct sockaddr_in server;
 	struct audio_info info;
+	struct request_packet request;
 
     // TODO re-enable for submission
-//	signal( SIGINT, sigint_handler );	// trap Ctrl^C signals
+	// signal( SIGINT, sigint_handler );	// trap Ctrl^C signals
 
 	// parse arguments
-	if (argc < 3){
-		printf ("error : called with incorrect number of parameters\nusage : %s <server_name/IP> <filename> [<filter> [filter_options]]]\n", argv[0]) ;
+	if (argc < 3 || argc > 5){
+		printf ("error : called with incorrect number of parameters\nusage : %s <server_name/IP> <filename> [<filter> [filter_option]]\n", argv[0]) ;
 		return -1;
 	}
 
-    // Verify the filename length
-	char *filename = argv[2];
-	if(strlen(filename) > FILESIZE_MAX) {
-        printf("Filename is too long, max %d characters\n", FILESIZE_MAX);
-        return -1;
+	err = create_request(argc, argv, &request);
+	if(err < 0) {
+	    printf("Failed to create request\n");
+	    return -1;
 	}
 
 	ip = resolve_hostname(argv[1]);
@@ -320,9 +367,9 @@ int main (int argc, char *argv [])
     // Send the filename to the server
     // TODO make packet with library information
 
-    printf("Requesting %s from %s:%d\n", filename, ip, PORT);
+    printf("Requesting %s from %s:%d\n", request.filename, ip, PORT);
 
-    err = request_file(server_fd, &server, filename, &info);
+    err = send_request(server_fd, &server, &request, &info);
     if(err < 0) {
         printf("Failed to request file\n");
         return -1;
