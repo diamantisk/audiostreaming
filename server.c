@@ -48,6 +48,56 @@ int nsleep(long nanoseconds) {
     return nanosleep(&req, &rem);
 }
 
+/** Send an audio info packet to the client
+ *
+ * @param client_fd  the client descriptor
+ * @param client  the client socket
+ * @param datafile  the name of the datafile
+ * @param sample_size   the sample size
+ * @param sample_rate   the sample rate
+ * @param channels   the number of channels
+ * @param time_per_packet   the time required to write a packet to audio
+ *
+ * @return  0 on success, <0 otherwise
+ */
+int send_request_response_success(int client_fd, struct sockaddr_in *client, char *datafile, int sample_size, int sample_rate, int channels, long time_per_packet) {
+    int err;
+    struct audio_info info;
+
+    info.sample_rate = sample_rate;
+    info.sample_size = sample_size;
+    info.channels = channels;
+    info.time_per_packet = time_per_packet;
+    info.status = SUCCESS;
+    strncpy(info.filename, datafile, strlen(datafile));
+
+    err = sendto(client_fd, &info, sizeof(info), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
+    if(err < 0) {
+        perror("Error sending initial packet");
+        return -1;
+    }
+
+    return 0;
+}
+
+int send_request_response_failure(int client_fd, struct sockaddr_in *client, enum flag status) {
+    int err;
+    struct audio_info info;
+    info.status = status;
+
+    if(status == FILE_NOT_FOUND) {
+        printf("yay we got failure\n");
+    }
+
+    err = sendto(client_fd, &info, sizeof(info), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
+    if(err < 0) {
+        perror("Error sending request response");
+        return -1;
+    }
+
+    return 0;
+}
+
 /** Verify whether a file exists on disk and send an error packet in case it does not
  *
  * @param datafile  the name of the datafile
@@ -60,13 +110,10 @@ int verify_file_existence(char *datafile, int client_fd, struct sockaddr_in *cli
     int err;
     // Check for file existence
     if(access(datafile, F_OK) == -1) {
-        struct audio_info info;
-        info.status = FILE_NOT_FOUND;
-
         printf("Error: datafile not found, sending FILE_NOT_FOUND\n");
-        err = sendto(client_fd, &info, sizeof(info), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
+        err = send_request_response_failure(client_fd, client, FILE_NOT_FOUND);
         if(err < 0) {
-            perror("Error sending initial packet");
+            perror("Error sending request response");
         }
 
         return -1;
@@ -91,13 +138,11 @@ int open_input(char *datafile, int client_fd, struct sockaddr_in *client, int *s
 
      data_fd = aud_readinit(datafile, sample_rate, sample_size, channels);
     if (data_fd < 0) {
-        struct audio_info info;
-        info.status = FAILURE;
-
         printf("Error: failed to open input, sending FAILURE\n");
-        err = sendto(client_fd, &info, sizeof(info), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
+
+        err = send_request_response_failure(client_fd, client, FAILURE);
         if(err < 0) {
-            perror("Error sending initial packet");
+            perror("Error sending request response");
         }
 
         return -1;
@@ -118,38 +163,6 @@ int open_input(char *datafile, int client_fd, struct sockaddr_in *client, int *s
 long calculate_time_per_packet(int sample_size, int sample_rate, int channels, int buffer_size) {
     float bit_rate = sample_size * sample_rate * channels;
     return 8000000000 * ((float) buffer_size / (float) bit_rate); //453514720
-}
-
-/** Send an audio info packet to the client
- *
- * @param client_fd  the client descriptor
- * @param client  the client socket
- * @param datafile  the name of the datafile
- * @param sample_size   the sample size
- * @param sample_rate   the sample rate
- * @param channels   the number of channels
- * @param time_per_packet   the time required to write a packet to audio
- *
- * @return  0 on success, <0 otherwise
- */
-int send_audio_info(int client_fd, struct sockaddr_in *client, char *datafile, int sample_size, int sample_rate, int channels, long time_per_packet) {
-    int err;
-    struct audio_info info;
-
-    info.sample_rate = sample_rate;
-    info.sample_size = sample_size;
-    info.channels = channels;
-    info.time_per_packet = time_per_packet;
-    info.status = SUCCESS;
-    strncpy(info.filename, datafile, strlen(datafile));
-
-    err = sendto(client_fd, &info, sizeof(info), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
-    if(err < 0) {
-        perror("Error sending initial packet");
-        return -1;
-    }
-
-    return 0;
 }
 
 /** Stream audio packets to the client
@@ -232,7 +245,58 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, char *da
 	return 0;
 }
 
-/** Open a request made by a client and store the info in a request packet
+/** Open a library
+ * @param libname   the name of the library
+ * @param libarg    the argument of the library
+ * @param lib       A pointer to store the resulting library in
+ *
+ * @return  0 on success, <0 otherwise
+ */
+int open_lib(char *libname, char *libarg, void *lib, int client_fd, struct sockaddr_in *client) {
+    int err;
+    server_verify verify_arg;
+
+    lib = dlopen(libname, RTLD_NOW);
+
+    if(lib == NULL) {
+        printf("Failed to load library: %s, sending LIBRARY_NOT_FOUND\n", dlerror());
+
+        err = send_request_response_failure(client_fd, client, LIBRARY_NOT_FOUND);
+        if(err < 0) {
+            perror("Error sending request response");
+        }
+
+        return -1;
+    }
+
+    verify_arg = dlsym(lib, "verify_arg");
+    if (verify_arg == NULL) {
+        printf("Failed to load symbol: %s, sending FAILURE\n", dlerror());
+
+        err = send_request_response_failure(client_fd, client, FAILURE);
+        if(err < 0) {
+            perror("Error sending request response");
+        }
+
+        return -1;
+    }
+
+    err = verify_arg(libarg);
+    if(err < 0) {
+        printf("Filter option %s not available for library %s, sending LIBRARY_ARG_NOT_FOUND\n", libarg, libname);
+
+        err = send_request_response_failure(client_fd, client, LIBRARY_ARG_NOT_FOUND);
+        if(err < 0) {
+            perror("Error sending request response");
+        }
+
+        return -1;
+    }
+
+    return 0;
+}
+
+/** Open a request made by a client and store the library info in a request packet
  *
  * @param request_buffer    the buffer received from the request
  * @param request   a pointer to the request packet to store the data in
@@ -242,8 +306,6 @@ void open_request(char *request_buffer, struct request_packet *request) {
 
     strncpy(request->filename, received->filename, strlen(received->filename));
     request->filename[strlen(received->filename)] = '\0';
-
-    printf("[open_request] filename: %s\n", request->filename);
 
     strncpy(request->libname, received->libname, strlen(received->libname));
     request->libname[strlen(received->libname)] = '\0';
@@ -264,20 +326,33 @@ int process_request(int client_fd, struct sockaddr_in *client, struct request_pa
     int data_fd, err;
     int channels, sample_size, sample_rate;
     long time_per_packet;
+    void *lib = NULL;
 
+    // Verify file existence
     err = verify_file_existence(request->filename, client_fd, client);
     if(err < 0) {
         return err;
     }
 
+    // Open the requested file
     data_fd = open_input(request->filename, client_fd, client, &sample_rate, &sample_size, &channels);
     if(data_fd < 0) {
         return data_fd;
     }
 
+    // Open the requested library if applicable
+    if(strcmp(request->libname, NONE) != 0) {
+        err = open_lib(request->libname, request->libarg, lib, client_fd, client);
+        if(err < 0) {
+
+        }
+    } else {
+        printf("No library requested\n");
+    }
+
     time_per_packet = calculate_time_per_packet(sample_size, sample_rate, channels, BUFSIZE);
 
-    err = send_audio_info(client_fd, client, request->filename, sample_size, sample_rate, channels, time_per_packet);
+    err = send_request_response_success(client_fd, client, request->filename, sample_size, sample_rate, channels, time_per_packet);
     if(err < 0) {
         return err;
     }
@@ -337,13 +412,19 @@ int main (int argc, char **argv)
 	char request_buffer[sizeof(struct request_packet)];
 	socklen_t flen;
 	struct sockaddr_in client;
-	
+
 	// TODO re-enable for submission
 //	 signal(SIGINT, sigint_handler );	// trap Ctrl^C signals
 
     // lib stuff, it works
     /*char *libfile = "/home/thomas/Documents/sysprog/assignment4/libblank.so";
+    char *libarg = "mids";
     void *mylibrary;
+
+    err = open_lib(libfile, mylibrary, libarg);
+
+    return 0;
+
     server_filterfunc pfunc;
 
     // optionally open a library
@@ -372,21 +453,20 @@ int main (int argc, char **argv)
     else{
         pfunc = NULL;
         printf("not using a filter\n");
-    }
-
-    return 0;*/
+    }*/
 
     client_fd = setup_socket(PORT, &flen, &client);
     if(client_fd < 0) {
         printf("Failed to set up socket\n");
         return -1;
     }
-	
+
+    printf("Listening on port %d...\n\n", PORT);
+
 	while (!breakloop) {
 
 	    struct request_packet request;
 	    // Wait for incoming messages
-		printf("Listening on port %d\n", PORT);
 		err = recvfrom(client_fd, request_buffer, FILENAME_MAX, 0, (struct sockaddr*) &client, &flen);
 		if(err < 0) {
 			perror("Error receiving packet");
@@ -397,15 +477,15 @@ int main (int argc, char **argv)
         printf("^^^^ Request received from %s:%d ^^^^\n", inet_ntoa(client.sin_addr), ntohs(client.sin_port));
 
         open_request(request_buffer, &request);
-        err = process_request(client_fd, &client, request_buffer);
+        err = process_request(client_fd, &client, &request);
 
 		printf("---- Request processed from %s:%d: ", inet_ntoa(client.sin_addr), ntohs(client.sin_port));
 		(err == 0) ? (printf("Success")) : (printf("Failure"));
-		printf(" ----\n");
+		printf(" ----\n\n");
 
-         printf("[main] filename: %s (%ld)\n", request.filename, strlen(request.filename));
-         printf("[main] libname: %s (%ld)\n", request.libname, strlen(request.libname));
-         printf("[main] libarg: %s (%ld)\n", request.libarg, strlen(request.libarg));
+//         printf("[main] filename: %s (%ld)\n", request.filename, strlen(request.filename));
+//         printf("[main] libname: %s (%ld)\n", request.libname, strlen(request.libname));
+//         printf("[main] libarg: %s (%ld)\n", request.libarg, strlen(request.libarg));
 	}
 
 	return 0;

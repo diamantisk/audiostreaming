@@ -255,7 +255,7 @@ int parse_stream(int server_fd, int audio_fd, int time_per_packet) {
 int send_request(int server_fd, struct sockaddr_in *server, struct request_packet *request, struct audio_info *info) {
     int err;
     char info_buffer[sizeof(struct audio_info)];
-    struct audio_info *received;
+    struct audio_info *response;
 
     printf("Sent %ld bytes\n", sizeof(struct request_packet));
     printf("libarg: %s (%d)\n", request->libarg, strlen(request->libarg));
@@ -271,26 +271,51 @@ int send_request(int server_fd, struct sockaddr_in *server, struct request_packe
         return err;
     }
 
-    received = (struct audio_info *) info_buffer;
+    response = (struct audio_info *) info_buffer;
 
-    if(received->status == FILE_NOT_FOUND) {
-        printf("Server responded: file not found\n");
-        return -1;
-    } else
-    if(received->status == FAILURE) {
-        printf("Server responded: failure\n");
+    err = process_request_response(response->status);
+    if(err < 0) {
+        printf("No successful response, aborting\n");
         return -1;
     }
 
-    // Copy the received data to the info struct
-    info->sample_size = received->sample_size;
-    info->sample_rate = received->sample_rate;
-    info->channels = received->channels;
-    info->time_per_packet = received->time_per_packet;
-    info->status = received->status;
-    strncpy(info->filename, received->filename, strlen(received->filename));
+    // Copy the response data to the info struct
+    info->sample_size = response->sample_size;
+    info->sample_rate = response->sample_rate;
+    info->channels = response->channels;
+    info->time_per_packet = response->time_per_packet;
+    info->status = response->status;
+    strncpy(info->filename, response->filename, strlen(response->filename));
 
     return 0;
+}
+
+int process_request_response(enum flag status) {
+    printf("Server responded: ");
+
+//    enum flag {SUCCESS, FILE_NOT_FOUND, LIBRARY_NOT_FOUND, LIBRARY_ARG_NOT_FOUND, FAILURE} status;
+
+    switch(status) {
+        case SUCCESS:
+            printf("SUCCESS\n");
+            return 0;
+        case FILE_NOT_FOUND:
+            printf("FILE_NOT_FOUND\n");
+            break;
+        case LIBRARY_NOT_FOUND:
+            printf("LIBRARY_NOT_FOUND\n");
+            break;
+        case LIBRARY_ARG_NOT_FOUND:
+            printf("LIBRARY_ARG_NOT_FOUND\n");
+            break;
+        case FAILURE:
+            printf("FAILURE\n");
+            break;
+        default:
+            printf("INVALID RESPONSE\n");
+    }
+
+    return -1;
 }
 
 /** Create a request packet to send to the server

@@ -6,9 +6,15 @@
  * contact : arno@cs.vu.nl
  * */
 
+#include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "library.h"
+#include "packet.h"
+
+char *ARGS[] = {"left", "right", "mid", NONE};
+int NUMARGS = 4;
 
 /* library's initialization function */
 void _init()
@@ -27,6 +33,21 @@ char *decode(char* buffer, int bufferlen, int *outbufferlen)
     printf("decoding\n");
 	*outbufferlen = bufferlen;
 	return buffer;
+}
+
+/** Verify whether the filter argument is applicable to the library
+ *  TODO expand
+ */
+int verify_arg(char *libarg) {
+    int i = 0;
+    while(i < NUMARGS) {
+        if(strcmp(libarg, ARGS[i]) == 0) {
+            return 0;
+        }
+        i ++;
+    }
+
+    return -1;
 }
 
 

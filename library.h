@@ -17,6 +17,8 @@
 // there is NO reason to stick to this typedef
 typedef int (*server_filterfunc)(char *, int);
 
+typedef int (*server_verify)(char *);
+
 /// a prototype of a filter function for the client
 //
 // there is NO reason to stick to this typedef

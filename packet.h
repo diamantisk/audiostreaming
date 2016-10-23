@@ -14,7 +14,7 @@ struct __attribute__((packed)) audio_info {
     int sample_rate;
     long time_per_packet;   // Nanoseconds
     char filename[FILESIZE_MAX];
-    enum flag {SUCCESS, FILE_NOT_FOUND, FAILURE} status;
+    enum flag {SUCCESS, FILE_NOT_FOUND, LIBRARY_NOT_FOUND, LIBRARY_ARG_NOT_FOUND, FAILURE} status;
 };
 
 struct __attribute__((packed)) request_packet {
