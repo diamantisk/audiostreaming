@@ -11,15 +11,17 @@
 //
 // ofcourse, when either is useless you do not have to implement it
 // for example, there's no reason to create a decoder for a 44.1->22 kHz convertor
+#define NONE    "none"
+#define INT     "int"
 
-/// an example function prototype for the server
-//
-// there is NO reason to stick to this typedef
+int num_args_allowed;
+int int_min, int_max;
+int int_allowed;
+char *arg;
+int arg_int;
+
 typedef int (*server_filterfunc)(char *, int);
 
-typedef int (*server_verify)(char *);
+typedef int (*server_alter_sample_rate)(int);
 
-/// a prototype of a filter function for the client
-//
-// there is NO reason to stick to this typedef
-typedef char * (*client_filterfunc)(char *, int, int*);
+typedef int (*server_verify)(char *);

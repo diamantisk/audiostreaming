@@ -1,10 +1,9 @@
 #ifndef _PACKET_H_
 #define _PACKET_H_
 
-#define BUFSIZE 5000
+#define BUFSIZE 1024
 #define PORT 12345
 #define FILESIZE_MAX 100
-#define NONE "none"
 
 //extern int PORT, BUFSIZE, FILESIZE_MAX;
 
@@ -14,7 +13,7 @@ struct __attribute__((packed)) audio_info {
     int sample_rate;
     long time_per_packet;   // Nanoseconds
     char filename[FILESIZE_MAX];
-    enum flag {SUCCESS, FILE_NOT_FOUND, LIBRARY_NOT_FOUND, LIBRARY_ARG_NOT_FOUND, FAILURE} status;
+    enum flag {SUCCESS, FILE_NOT_FOUND, LIBRARY_NOT_FOUND, LIBRARY_ARG_NOT_FOUND, LIBRARY_ARG_REQUIRED, FAILURE} status;
 };
 
 struct __attribute__((packed)) request_packet {

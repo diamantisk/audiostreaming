@@ -162,20 +162,25 @@ int open_input(char *datafile, int client_fd, struct sockaddr_in *client, int *s
  */
 long calculate_time_per_packet(int sample_size, int sample_rate, int channels, int buffer_size) {
     float bit_rate = sample_size * sample_rate * channels;
+    long time = 8000000000 * ((float) buffer_size / (float) bit_rate);
+    printf("bit_rate: %f, sample size: %d\n", bit_rate, sample_size);
+    printf("time: %ld\n", time);
     return 8000000000 * ((float) buffer_size / (float) bit_rate); //453514720
 }
 
+// TODO update
 /** Stream audio packets to the client
  *
  * @param client_fd  the client descriptor
  * @param audio_fd  the audio descriptor
  * @param client  the client socket
+ * @param lib_requested       Whether a library is requested or not
  * @param datafile  the name of the datafile
  * @param time_per_packet   the time required to write a packet to audio
  *
  * @return  0 on success, <0 otherwise
  */
-int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, char *datafile, long time_per_packet)
+int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, void *lib, char *datafile, long time_per_packet)
 {
 	int audiobytesread, err;
     struct audio_packet packet;
@@ -188,9 +193,13 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, char *da
     int seqtemp = 0;
     srand(time(NULL));
 
+    printf("LIB (stream_data): %p\n", lib);
+
+
+//    return 0;
 
     audiobytesread = read(data_fd, packet.buffer, BUFSIZE);
-    while (audiobytesread > 0){
+    while (audiobytesread > 0) {
         i = 0;
 
         seqtemp = seq;
@@ -199,9 +208,50 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, char *da
 //            seq = 1337;
         }
 
+        /*int n, sample;
+        for(n = 0; n < audiobytesread; n++) {
+            if(n % 2 == 0)
+                packet.buffer[n] = 0;
+        }*/
+
         if(i % 2 == 0) {
             packet.seq = seq;
             packet.audiobytesread = audiobytesread;
+
+            // nonsense here
+            /*int j = 1;
+            while(j < audiobytesread) {
+//                if(j % 1000 == 0) {
+                    float percent = 0.8;
+                    int newvalue = packet.buffer[j] * percent;
+
+                    printf("%d > %d\n", packet.buffer[j], newvalue);
+                    packet.buffer[j] += packet.buffer[j - 1] * 0.1;
+//                }
+//                packet.buffer[j] *= 0.5 ;
+                j ++;
+            }*/
+//            printf("audiobytesread: %d: %s\n", packet.audiobytesread, packet.buffer);
+
+//            while(j < audiobytesread) {
+//                if(j % 50 == 0) {
+//                    packet.buffer[j] = "0";
+//                    printf("Yay j = %d\n", j);
+//                }
+//
+//                j ++;
+//            }
+
+
+//            return 0;
+
+//            if(audiobytesread < BUFSIZE) {
+//                for(int n = 0; n < BUFSIZE; n++) {
+//                    packet.buffer[n] = 0;
+//                }
+//            }
+
+
             err = sendto(client_fd, &packet, sizeof(struct audio_packet), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
             if(err < 0) {
                 perror("Error sending packet");
@@ -245,6 +295,7 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, char *da
 	return 0;
 }
 
+// TODO update
 /** Open a library
  * @param libname   the name of the library
  * @param libarg    the argument of the library
@@ -252,7 +303,7 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, char *da
  *
  * @return  0 on success, <0 otherwise
  */
-int open_lib(char *libname, char *libarg, void *lib, int client_fd, struct sockaddr_in *client) {
+void *open_lib(char *libname, char *libarg, void *lib, int client_fd, struct sockaddr_in *client, int verify) {
     int err;
     server_verify verify_arg;
 
@@ -266,34 +317,49 @@ int open_lib(char *libname, char *libarg, void *lib, int client_fd, struct socka
             perror("Error sending request response");
         }
 
-        return -1;
+        return NULL;
     }
 
-    verify_arg = dlsym(lib, "verify_arg");
-    if (verify_arg == NULL) {
-        printf("Failed to load symbol: %s, sending FAILURE\n", dlerror());
 
-        err = send_request_response_failure(client_fd, client, FAILURE);
-        if(err < 0) {
-            perror("Error sending request response");
+    if(verify) {
+        printf("Verifying lib data provided\n");
+        verify_arg = dlsym(lib, "verify_arg");
+        if (verify_arg == NULL) {
+            printf("Failed to load symbol: %s, sending FAILURE\n", dlerror());
+
+            err = send_request_response_failure(client_fd, client, FAILURE);
+            if (err < 0) {
+                perror("Error sending request response");
+            }
+
+            return NULL;
         }
 
-        return -1;
-    }
+        err = verify_arg(libarg);
+        if (err < 0) {
+            if (err == -2) {
+                printf("Filter option required for library %s, sending LIBRARY_ARG_REQUIRED\n", libname);
+                err = send_request_response_failure(client_fd, client, LIBRARY_ARG_REQUIRED);
+                if (err < 0) {
+                    perror("Error sending request response");
+                }
 
-    err = verify_arg(libarg);
-    if(err < 0) {
-        printf("Filter option %s not available for library %s, sending LIBRARY_ARG_NOT_FOUND\n", libarg, libname);
+                return NULL;
+            }
 
-        err = send_request_response_failure(client_fd, client, LIBRARY_ARG_NOT_FOUND);
-        if(err < 0) {
-            perror("Error sending request response");
+            printf("Filter option %s not available for library %s, sending LIBRARY_ARG_NOT_FOUND\n", libarg, libname);
+
+            err = send_request_response_failure(client_fd, client, LIBRARY_ARG_NOT_FOUND);
+            if (err < 0) {
+                perror("Error sending request response");
+            }
+
+            return NULL;
         }
-
-        return -1;
     }
 
-    return 0;
+    printf("LIB: %p\n", lib);
+    return lib;
 }
 
 /** Open a request made by a client and store the library info in a request packet
@@ -327,11 +393,23 @@ int process_request(int client_fd, struct sockaddr_in *client, struct request_pa
     int channels, sample_size, sample_rate;
     long time_per_packet;
     void *lib = NULL;
+    int lib_requested = 0;
 
     // Verify file existence
     err = verify_file_existence(request->filename, client_fd, client);
     if(err < 0) {
         return err;
+    }
+
+    // Open the requested library if applicable
+    if(strcmp(request->libname, NONE) != 0) {
+        lib_requested = 1;
+        lib = open_lib(request->libname, request->libarg, lib, client_fd, client, 1);
+        if(lib == NULL) {
+            return -1;
+        }
+    } else {
+        printf("No library requested\n");
     }
 
     // Open the requested file
@@ -340,14 +418,14 @@ int process_request(int client_fd, struct sockaddr_in *client, struct request_pa
         return data_fd;
     }
 
-    // Open the requested library if applicable
-    if(strcmp(request->libname, NONE) != 0) {
-        err = open_lib(request->libname, request->libarg, lib, client_fd, client);
-        if(err < 0) {
-
+    if(lib) {
+        server_alter_sample_rate alter_sample_rate = dlsym(lib, "alter_sample_rate");
+        if(alter_sample_rate == NULL) {
+            printf("No alter_sample_rate available\n");
+        } else {
+            printf("Yay alter_sample_rate IS THERE\n");
+            sample_rate = alter_sample_rate(sample_rate);
         }
-    } else {
-        printf("No library requested\n");
     }
 
     time_per_packet = calculate_time_per_packet(sample_size, sample_rate, channels, BUFSIZE);
@@ -357,7 +435,7 @@ int process_request(int client_fd, struct sockaddr_in *client, struct request_pa
         return err;
     }
 
-    return stream_data(client_fd, data_fd, client, request->filename, time_per_packet);
+    return stream_data(client_fd, data_fd, client, lib, request->filename, time_per_packet);
 }
 
 /// unimportant: the signal handler. This function gets called when Ctrl^C is pressed
@@ -474,18 +552,14 @@ int main (int argc, char **argv)
 		}
 
         // Print a recognizable start and end of the streaming progress to stdout
-        printf("^^^^ Request received from %s:%d ^^^^\n", inet_ntoa(client.sin_addr), ntohs(client.sin_port));
+        printf("----- Request received from %s:%d\n", inet_ntoa(client.sin_addr), ntohs(client.sin_port));
 
         open_request(request_buffer, &request);
         err = process_request(client_fd, &client, &request);
 
-		printf("---- Request processed from %s:%d: ", inet_ntoa(client.sin_addr), ntohs(client.sin_port));
+		printf("----- Request processed from %s:%d: ", inet_ntoa(client.sin_addr), ntohs(client.sin_port));
 		(err == 0) ? (printf("Success")) : (printf("Failure"));
-		printf(" ----\n\n");
-
-//         printf("[main] filename: %s (%ld)\n", request.filename, strlen(request.filename));
-//         printf("[main] libname: %s (%ld)\n", request.libname, strlen(request.libname));
-//         printf("[main] libarg: %s (%ld)\n", request.libarg, strlen(request.libarg));
+		printf("\n\n");
 	}
 
 	return 0;

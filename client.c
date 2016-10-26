@@ -238,10 +238,42 @@ int parse_stream(int server_fd, int audio_fd, int time_per_packet) {
     if(audiobytesread > 0) {
         // TODO debug
         printf("Read %d audio bytes (packet %d)\n", packet.audiobytesread, packet.seq);
-        write(audio_fd, packet.buffer, audiobytesread);
+
+        write(audio_fd, packet.buffer, packet.audiobytesread);
     }
 
     return 0;
+}
+
+int process_request_response(enum flag status) {
+    printf("Server responded: ");
+
+//    enum flag {SUCCESS, FILE_NOT_FOUND, LIBRARY_NOT_FOUND, LIBRARY_ARG_NOT_FOUND, FAILURE} status;
+
+    switch(status) {
+        case SUCCESS:
+            printf("SUCCESS\n");
+            return 0;
+        case FILE_NOT_FOUND:
+            printf("FILE_NOT_FOUND\n");
+            break;
+        case LIBRARY_NOT_FOUND:
+            printf("LIBRARY_NOT_FOUND\n");
+            break;
+        case LIBRARY_ARG_NOT_FOUND:
+            printf("LIBRARY_ARG_NOT_FOUND\n");
+            break;
+        case LIBRARY_ARG_REQUIRED:
+            printf("LIBRARY_ARG_REQUIRED\n");
+            break;
+        case FAILURE:
+            printf("FAILURE\n");
+            break;
+        default:
+            printf("INVALID RESPONSE\n");
+    }
+
+    return -1;
 }
 
 /** Request the server to initialize a streaming session for a file
@@ -288,34 +320,6 @@ int send_request(int server_fd, struct sockaddr_in *server, struct request_packe
     strncpy(info->filename, response->filename, strlen(response->filename));
 
     return 0;
-}
-
-int process_request_response(enum flag status) {
-    printf("Server responded: ");
-
-//    enum flag {SUCCESS, FILE_NOT_FOUND, LIBRARY_NOT_FOUND, LIBRARY_ARG_NOT_FOUND, FAILURE} status;
-
-    switch(status) {
-        case SUCCESS:
-            printf("SUCCESS\n");
-            return 0;
-        case FILE_NOT_FOUND:
-            printf("FILE_NOT_FOUND\n");
-            break;
-        case LIBRARY_NOT_FOUND:
-            printf("LIBRARY_NOT_FOUND\n");
-            break;
-        case LIBRARY_ARG_NOT_FOUND:
-            printf("LIBRARY_ARG_NOT_FOUND\n");
-            break;
-        case FAILURE:
-            printf("FAILURE\n");
-            break;
-        default:
-            printf("INVALID RESPONSE\n");
-    }
-
-    return -1;
 }
 
 /** Create a request packet to send to the server
