@@ -1,23 +1,16 @@
-/* libblank.c
- *
- * part of the Systems Programming assignment
- * (c) Vrije Universiteit Amsterdam, 2005-2015. BSD License applies
- * author  : wdb -_at-_ few.vu.nl
- * contact : arno@cs.vu.nl
- * */
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 
 #include "library.h"
 #include "packet.h"
 
-char *args_allowed[] = {"left", "right", "mid", INT};
-num_args_allowed = 4;
-int_allowed = 0;
-int arg_min = 0;
-int arg_max = 200;
+char *args_allowed[] = {"half", "double", "triple", INT};
+int num_args_allowed = 4;
+int int_allowed = 0;
+int arg_min = 10;
+int arg_max = 400;
 
 void _init()
 {
@@ -37,26 +30,24 @@ int filter(char *buffer, int bufferlen) {
 }
 
 int alter_sample_rate(int sample_rate) {
-    printf("Altering sample rate\n");
+//    printf("arg: %s\n", arg);
+//    printf("arg_int: %d\n", arg_int);
+    if(arg) {
+        printf("WE GOT ARG STRING\n");
+        if(strcmp("half", arg) == 0) {
+            arg_int = 50;
+        } else
+        if(strcmp("double", arg) == 0) {
+            arg_int = 200;
+        } else
+        if(strcmp("triple", arg) == 0) {
+            arg_int = 300;
+        }
+    }
+
     float percentage = (float) arg_int / 100;
     float result_float = (float) sample_rate * percentage;
-    int result = (int) result_float;
-    printf("%d * %f = %f (%d)\n", sample_rate, percentage, result_float, result);
-    return result;
-}
-
-
-int encode(char* buffer, int bufferlen)
-{
-    printf("encoding\n");
-	return bufferlen;
-}
-
-char *decode(char* buffer, int bufferlen, int *outbufferlen)
-{
-    printf("decoding\n");
-	*outbufferlen = bufferlen;
-	return buffer;
+    return (int) result_float;
 }
 
 /** Verify whether the filter argument is applicable to the library
@@ -65,11 +56,11 @@ char *decode(char* buffer, int bufferlen, int *outbufferlen)
 int verify_arg(char *libarg) {
     int i = 0;
     while(i < num_args_allowed) {
-        // Does one of the strings match ARG?
+        // Store the string in the library if it is a valid argument
         if(strcmp(libarg, args_allowed[i]) == 0) {
-            printf("strlen: %d\n", strlen(libarg));
-            // TODO copy string
-            arg = "Hello";
+            arg = malloc(sizeof(char) * (strlen(libarg) + 1));
+            strncpy(arg, libarg, strlen(libarg));
+            arg[strlen(libarg)] = '\0';
             return 0;
         }
 
@@ -111,5 +102,8 @@ int verify_arg(char *libarg) {
 void _fini()
 {
 	printf("Cleaning out library\n");
+    arg_int = 0;
+    if(arg != NULL)
+        free(arg);
 }
 

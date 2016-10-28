@@ -15,7 +15,6 @@
 #define INT     "int"
 
 int num_args_allowed;
-int int_min, int_max;
 int int_allowed;
 char *arg;
 int arg_int;
@@ -23,5 +22,7 @@ int arg_int;
 typedef int (*server_filterfunc)(char *, int);
 
 typedef int (*server_alter_sample_rate)(int);
+
+typedef int (*server_reverse)(char *, int);
 
 typedef int (*server_verify)(char *);

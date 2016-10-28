@@ -75,7 +75,7 @@ int receive_packet(fd_set *read_set, int server_fd, struct audio_packet *packet,
     if(FD_ISSET(server_fd, read_set)) {
         bytesread = read(server_fd, packet_buffer, sizeof(struct audio_packet));
         // TODO debug
-        printf("Received %d bytes\n", bytesread);
+//        printf("Received %d bytes\n", bytesread);
 
         // Cast the received buffer to a packet struct and copy the data to the original packet
         struct audio_packet *received_packet = (struct audio_packet *) packet_buffer;
@@ -197,7 +197,7 @@ int receive_audio_info(int server_fd, char *info_buffer) {
  *
  * @return 0 on success, <0 otherwise
  */
-int parse_stream(int server_fd, int audio_fd, int time_per_packet) {
+int parse_stream(int server_fd, int audio_fd, long time_per_packet) {
     int audiobytesread, packet_timeouts, seq_expected;
     long packet_timeout_sec, packet_timeout_usec;
     fd_set read_set;
@@ -209,7 +209,6 @@ int parse_stream(int server_fd, int audio_fd, int time_per_packet) {
     seq_expected = 0;
 
     audiobytesread = receive_packet(&read_set, server_fd, &packet, packet_timeout_sec, packet_timeout_usec);
-    printf("Packet number main: %d\n", packet.seq);
 
     while (audiobytesread == BUFSIZE || audiobytesread == 0) {
         if(audiobytesread == 0) {
@@ -220,24 +219,32 @@ int parse_stream(int server_fd, int audio_fd, int time_per_packet) {
             printf("Waiting for reply (%d)...\n", packet_timeouts);
             packet_timeouts ++;
         } else {
-            printf("Read %d audio bytes (packet %d)\n", packet.audiobytesread, packet.seq);
+            printf("Read %d (%d) audio bytes (packet %d)\n", packet.audiobytesread, audiobytesread, packet.seq);
             if(packet.seq == seq_expected) {
+
+                int n, sample;
+                for(n = 0; n < audiobytesread; n++) {
+//                    printf("Before: %d\n", packet.buffer[n]);
+//                    packet.buffer[n] = packet.buffer[n] * 0.5;
+//                    printf("After: %d (%d)\n", packet.buffer[n], n);
+                }
+
                 write(audio_fd, packet.buffer, audiobytesread);
             } else {
                 printf("Wrong packet, expected %d but received %d\n", seq_expected, packet.seq);
                 // TODO what to do?
             }
 
-    //            printf("Sizeof(packet.buffer): %d\n", sizeof(packet.buffer));
+            seq_expected ++;
+            //            printf("Sizeof(packet.buffer): %d\n", sizeof(packet.buffer));
         }
 
-        seq_expected ++;
         audiobytesread = receive_packet(&read_set, server_fd, &packet, packet_timeout_sec, packet_timeout_usec);
     }
 
     if(audiobytesread > 0) {
         // TODO debug
-        printf("Read %d audio bytes (packet %d)\n", packet.audiobytesread, packet.seq);
+        printf("Read %d (%d) audio bytes (packet %d)\n", packet.audiobytesread, audiobytesread, packet.seq);
 
         write(audio_fd, packet.buffer, packet.audiobytesread);
     }
@@ -290,8 +297,6 @@ int send_request(int server_fd, struct sockaddr_in *server, struct request_packe
     struct audio_info *response;
 
     printf("Sent %ld bytes\n", sizeof(struct request_packet));
-    printf("libarg: %s (%d)\n", request->libarg, strlen(request->libarg));
-    printf("filename: %s\n", request->filename);
     err = sendto(server_fd, request, sizeof(struct request_packet), 0, (struct sockaddr*) server, sizeof(struct sockaddr_in));
     if(err < 0) {
         perror("Error sending packet");
@@ -403,8 +408,6 @@ int main (int argc, char *argv [])
         printf("Failed to request file\n");
         return -1;
     }
-
-    printf("packet time: %ld\n", info.time_per_packet);
 
     audio_fd = open_output(&info);
     if(audio_fd < 0) {

@@ -23,11 +23,6 @@
 
 static int breakloop = 0;	///< use this variable to stop your wait-loop. Occasionally check its value, !1 signals that the program should close
 
-/** Title
- *
- * @return
- */
-
 /** Sleep for a specified amount of time
  *
  * @param nanoseconds   The amount of nanoseconds to sleep
@@ -165,7 +160,7 @@ long calculate_time_per_packet(int sample_size, int sample_rate, int channels, i
     long time = 8000000000 * ((float) buffer_size / (float) bit_rate);
     printf("bit_rate: %f, sample size: %d\n", bit_rate, sample_size);
     printf("time: %ld\n", time);
-    return 8000000000 * ((float) buffer_size / (float) bit_rate); //453514720
+    return 8000000000 * ((float) buffer_size / (float) bit_rate); //453514720 for 11.12k/8bit/1channel
 }
 
 // TODO update
@@ -180,6 +175,7 @@ long calculate_time_per_packet(int sample_size, int sample_rate, int channels, i
  *
  * @return  0 on success, <0 otherwise
  */
+// TODO remove datafile?
 int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, void *lib, char *datafile, long time_per_packet)
 {
 	int audiobytesread, err;
@@ -193,7 +189,7 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, void *li
     int seqtemp = 0;
     srand(time(NULL));
 
-    printf("LIB (stream_data): %p\n", lib);
+//    printf("LIB (stream_data): %p\n", lib);
 
 
 //    return 0;
@@ -210,8 +206,9 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, void *li
 
         /*int n, sample;
         for(n = 0; n < audiobytesread; n++) {
-            if(n % 2 == 0)
-                packet.buffer[n] = 0;
+            printf("Before: %d\n", packet.buffer[n]);
+            packet.buffer[n] = 140;
+            printf("After: %d\n", packet.buffer[n]);
         }*/
 
         if(i % 2 == 0) {
@@ -247,7 +244,7 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, void *li
 
 //            if(audiobytesread < BUFSIZE) {
 //                for(int n = 0; n < BUFSIZE; n++) {
-//                    packet.buffer[n] = 0;
+//                    packet.buffer[n] = 100;
 //                }
 //            }
 
@@ -257,7 +254,7 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, void *li
                 perror("Error sending packet");
                 return 1;
             }
-            printf("Sent %d bytes of audio (packet number: %d)\n", audiobytesread, seq);
+//            printf("Sent %d bytes of audio (packet number: %d)\n", audiobytesread, seq);
             seq ++;
             seqtemp ++;
         } else {
@@ -273,7 +270,8 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, void *li
 
         // Only sleep if this is not the final packet
         if(audiobytesread == BUFSIZE) {
-            nsleep(time_per_packet);
+            nsleep(time_per_packet * 0.95);
+            // TODO make concrete
         }
 
         audiobytesread = read(data_fd, packet.buffer, BUFSIZE);
@@ -282,15 +280,10 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, void *li
     }
 
 	// TO IMPLEMENT : optionally close the connection gracefully
-
-//	if (client_fd >= 0)
-//		close(client_fd);
 	if (data_fd >= 0)
 		close(data_fd);
-//	if (datafile)
-//		free(datafile);
-//	if (libfile)
-//		free(libfile);
+	if (lib)
+		dlclose(lib);
 
 	return 0;
 }
@@ -303,7 +296,7 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, void *li
  *
  * @return  0 on success, <0 otherwise
  */
-void *open_lib(char *libname, char *libarg, void *lib, int client_fd, struct sockaddr_in *client, int verify) {
+void *open_lib(char *libname, char *libarg, void *lib, int client_fd, struct sockaddr_in *client) {
     int err;
     server_verify verify_arg;
 
@@ -320,8 +313,12 @@ void *open_lib(char *libname, char *libarg, void *lib, int client_fd, struct soc
         return NULL;
     }
 
+    err = verify_libarg(lib, libname, libarg, client_fd, client);
 
-    if(verify) {
+    printf("KDONE\n\n");
+
+
+    /*if(verify) {
         printf("Verifying lib data provided\n");
         verify_arg = dlsym(lib, "verify_arg");
         if (verify_arg == NULL) {
@@ -356,10 +353,59 @@ void *open_lib(char *libname, char *libarg, void *lib, int client_fd, struct soc
 
             return NULL;
         }
+    }*/
+
+//    printf("LIB: %p\n", lib);
+    return lib;
+}
+
+/** Verify the argument provided for a library
+ *
+ * @param lib           the library pointer
+ * @param libname       the library name
+ * @param libarg        the library argument
+ * @param client_fd     the client socket
+ * @param client        the client pointer
+ * @return              0 on success, <0 otherwise
+ */
+int verify_libarg(void *lib, char *libname, char *libarg, int client_fd, struct sockaddr_in *client) {
+    int err;
+    server_verify verify_arg;
+
+    // Check whether the function verify_arg is present in the library
+    verify_arg = dlsym(lib, "verify_arg");
+    if(verify_arg == NULL) {
+        printf("Filter option required for library %s, sending LIBRARY_ARG_REQUIRED\n", libname);
+
+        err = send_request_response_failure(client_fd, client, LIBRARY_ARG_REQUIRED);
+        if(err < 0)
+            perror("Error sending request response");
+
+        return -1;
     }
 
-    printf("LIB: %p\n", lib);
-    return lib;
+    // Check whether the provided argument is valid for the library
+    err = verify_arg(libarg);
+    if(err < 0) {
+        switch(err) {
+            case -2:
+                printf("Filter option required for library %s, sending LIBRARY_ARG_REQUIRED\n", libname);
+                int err = send_request_response_failure(client_fd, client, LIBRARY_ARG_REQUIRED);
+                if(err < 0)
+                    perror("Error sending request response");
+                break;
+            default:
+                printf("Filter option %s not available for library %s, sending LIBRARY_ARG_NOT_FOUND\n", libarg, libname);
+                err = send_request_response_failure(client_fd, client, LIBRARY_ARG_NOT_FOUND);
+                if(err < 0)
+                    perror("Error sending request response");
+                break;
+        }
+
+        return -1;
+    }
+
+    return 0;
 }
 
 /** Open a request made by a client and store the library info in a request packet
@@ -393,7 +439,6 @@ int process_request(int client_fd, struct sockaddr_in *client, struct request_pa
     int channels, sample_size, sample_rate;
     long time_per_packet;
     void *lib = NULL;
-    int lib_requested = 0;
 
     // Verify file existence
     err = verify_file_existence(request->filename, client_fd, client);
@@ -403,8 +448,7 @@ int process_request(int client_fd, struct sockaddr_in *client, struct request_pa
 
     // Open the requested library if applicable
     if(strcmp(request->libname, NONE) != 0) {
-        lib_requested = 1;
-        lib = open_lib(request->libname, request->libarg, lib, client_fd, client, 1);
+        lib = open_lib(request->libname, request->libarg, lib, client_fd, client);
         if(lib == NULL) {
             return -1;
         }
@@ -418,13 +462,30 @@ int process_request(int client_fd, struct sockaddr_in *client, struct request_pa
         return data_fd;
     }
 
+    // TODO refactor, seperate function
     if(lib) {
+        // alter_speed
         server_alter_sample_rate alter_sample_rate = dlsym(lib, "alter_sample_rate");
-        if(alter_sample_rate == NULL) {
-            printf("No alter_sample_rate available\n");
-        } else {
-            printf("Yay alter_sample_rate IS THERE\n");
+        if(alter_sample_rate)
             sample_rate = alter_sample_rate(sample_rate);
+
+        // reverse
+        server_reverse reverse = dlsym(lib, "reverse");
+        if(reverse) {
+            err = reverse(request->filename, channels);
+            if(err < 0) {
+                printf("Failed to apply reverse effect\n");
+                return err;
+            }
+
+            // Open the reversed file
+            close(data_fd);
+            data_fd = open_input(request->filename, client_fd, client, &sample_rate, &sample_size, &channels);
+            if(data_fd < 0) {
+                printf("Failed to open reversed file\n");
+                dlclose(lib);
+                return data_fd;
+            }
         }
     }
 
@@ -434,6 +495,8 @@ int process_request(int client_fd, struct sockaddr_in *client, struct request_pa
     if(err < 0) {
         return err;
     }
+
+//    return 0;
 
     return stream_data(client_fd, data_fd, client, lib, request->filename, time_per_packet);
 }

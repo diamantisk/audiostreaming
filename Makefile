@@ -15,7 +15,7 @@ LDFLAGS = -ldl
 ####################### TARGETS
 
 # add your libraries to this line, as in 'libtest.so', make sure you have a 'libtest.c' as source
-LIBS = libblank.so
+LIBS = alter_speed.so reverse.so
 
 .PHONY : all clean distclean
 
@@ -31,4 +31,3 @@ distclean : clean
 	rm -f server client *.so
 clean:
 	rm -f $(OBJECTS) server client *.o *.so *~
-
