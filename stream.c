@@ -1,17 +1,15 @@
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 
 #include "library.h"
-#include "packet.h"
 
 char *args_allowed[] = {"half", "double", "triple", "min", "max", INT};
 int num_args_allowed = 6;
 int int_allowed = 0;
-int arg_min = 10;
+int arg_min = 0;
 int arg_max = 400;
-int percentage;
 
 void _init()
 {
@@ -25,7 +23,26 @@ void _init()
     }
 }
 
-int alter_sample_rate(int sample_rate) {
+int filter(struct audio_packet *packet) {
+    // TODO debug
+//    printf("lib filter here (arg_int: %d, %f)\n", arg_int, (float) arg_int / 100);
+
+    for(int i = 0; i < packet->audiobytesread; i ++) {
+//        packet->buffer[i] *= (float) arg_int / 100;
+
+        if(packet->buffer[i] > 120) {
+            packet->buffer[i] = 120;
+        }
+
+        if(packet->buffer[i] < 20) {
+            packet->buffer[i] = 20;
+        }
+    }
+
+    return 0;
+}
+
+void calculate_volume() {
     if(arg) {
         if(strcmp("half", arg) == 0) {
             arg_int = 50;
@@ -43,15 +60,8 @@ int alter_sample_rate(int sample_rate) {
             arg_int = arg_max;
         }
     }
-
-    float percentage = (float) arg_int / 100;
-    float result_float = (float) sample_rate * percentage;
-    return (int) result_float;
 }
 
-/** Verify whether the filter argument is applicable to the library
- *  TODO expand
- */
 int verify_arg(char *libarg) {
     int i = 0;
     while(i < num_args_allowed) {
@@ -60,6 +70,7 @@ int verify_arg(char *libarg) {
             arg = malloc(sizeof(char) * (strlen(libarg) + 1));
             strncpy(arg, libarg, strlen(libarg));
             arg[strlen(libarg)] = '\0';
+            calculate_volume();
             return 0;
         }
 
@@ -93,13 +104,7 @@ int verify_arg(char *libarg) {
     return -1;
 }
 
-
-/* library's cleanup function */
 void _fini()
 {
-	printf("Cleaning out library\n");
-    arg_int = 0;
-    if(arg != NULL)
-        free(arg);
+    printf("Cleaning out library\n");
 }
-

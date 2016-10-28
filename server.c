@@ -176,7 +176,7 @@ long calculate_time_per_packet(int sample_size, int sample_rate, int channels, i
  * @return  0 on success, <0 otherwise
  */
 // TODO remove datafile?
-int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, void *lib, char *datafile, long time_per_packet)
+int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, void *lib, char *datafile, long time_per_packet, server_filter filter)
 {
 	int audiobytesread, err;
     struct audio_packet packet;
@@ -188,9 +188,6 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, void *li
     int seq = 0;
     int seqtemp = 0;
     srand(time(NULL));
-
-//    printf("LIB (stream_data): %p\n", lib);
-
 
 //    return 0;
 
@@ -248,6 +245,10 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, void *li
 //                }
 //            }
 
+            if(filter) {
+                printf("[stream] Filter pointer: %p\n", filter);
+                filter(&packet);
+            }
 
             err = sendto(client_fd, &packet, sizeof(struct audio_packet), 0, (struct sockaddr*) client, sizeof(struct sockaddr_in));
             if(err < 0) {
@@ -286,77 +287,6 @@ int stream_data(int client_fd, int data_fd, struct sockaddr_in *client, void *li
 		dlclose(lib);
 
 	return 0;
-}
-
-// TODO update
-/** Open a library
- * @param libname   the name of the library
- * @param libarg    the argument of the library
- * @param lib       A pointer to store the resulting library in
- *
- * @return  0 on success, <0 otherwise
- */
-void *open_lib(char *libname, char *libarg, void *lib, int client_fd, struct sockaddr_in *client) {
-    int err;
-    server_verify verify_arg;
-
-    lib = dlopen(libname, RTLD_NOW);
-
-    if(lib == NULL) {
-        printf("Failed to load library: %s, sending LIBRARY_NOT_FOUND\n", dlerror());
-
-        err = send_request_response_failure(client_fd, client, LIBRARY_NOT_FOUND);
-        if(err < 0) {
-            perror("Error sending request response");
-        }
-
-        return NULL;
-    }
-
-    err = verify_libarg(lib, libname, libarg, client_fd, client);
-
-    printf("KDONE\n\n");
-
-
-    /*if(verify) {
-        printf("Verifying lib data provided\n");
-        verify_arg = dlsym(lib, "verify_arg");
-        if (verify_arg == NULL) {
-            printf("Failed to load symbol: %s, sending FAILURE\n", dlerror());
-
-            err = send_request_response_failure(client_fd, client, FAILURE);
-            if (err < 0) {
-                perror("Error sending request response");
-            }
-
-            return NULL;
-        }
-
-        err = verify_arg(libarg);
-        if (err < 0) {
-            if (err == -2) {
-                printf("Filter option required for library %s, sending LIBRARY_ARG_REQUIRED\n", libname);
-                err = send_request_response_failure(client_fd, client, LIBRARY_ARG_REQUIRED);
-                if (err < 0) {
-                    perror("Error sending request response");
-                }
-
-                return NULL;
-            }
-
-            printf("Filter option %s not available for library %s, sending LIBRARY_ARG_NOT_FOUND\n", libarg, libname);
-
-            err = send_request_response_failure(client_fd, client, LIBRARY_ARG_NOT_FOUND);
-            if (err < 0) {
-                perror("Error sending request response");
-            }
-
-            return NULL;
-        }
-    }*/
-
-//    printf("LIB: %p\n", lib);
-    return lib;
 }
 
 /** Verify the argument provided for a library
@@ -401,11 +331,43 @@ int verify_libarg(void *lib, char *libname, char *libarg, int client_fd, struct 
                     perror("Error sending request response");
                 break;
         }
-
-        return -1;
     }
 
-    return 0;
+    return err;
+}
+
+// TODO update
+/** Open a library
+ * @param libname   the name of the library
+ * @param libarg    the argument of the library
+ * @param lib       A pointer to store the resulting library in
+ *
+ * @return  0 on success, <0 otherwise
+ */
+void *open_lib(char *libname, char *libarg, void *lib, int client_fd, struct sockaddr_in *client) {
+    int err;
+
+    lib = dlopen(libname, RTLD_NOW);
+
+    if(lib == NULL) {
+        printf("Failed to load library: %s, sending LIBRARY_NOT_FOUND\n", dlerror());
+
+        err = send_request_response_failure(client_fd, client, LIBRARY_NOT_FOUND);
+        if(err < 0) {
+            perror("Error sending request response");
+        }
+
+        return NULL;
+    }
+
+    err = verify_libarg(lib, libname, libarg, client_fd, client);
+    if(err < 0) {
+        dlclose(lib);
+        return NULL;
+    }
+
+//    printf("LIB: %p\n", lib);
+    return lib;
 }
 
 /** Open a request made by a client and store the library info in a request packet
@@ -439,6 +401,10 @@ int process_request(int client_fd, struct sockaddr_in *client, struct request_pa
     int channels, sample_size, sample_rate;
     long time_per_packet;
     void *lib = NULL;
+
+    server_filter filter = NULL;
+
+    int filter_lib_requested = 0;
 
     // Verify file existence
     err = verify_file_existence(request->filename, client_fd, client);
@@ -487,18 +453,29 @@ int process_request(int client_fd, struct sockaddr_in *client, struct request_pa
                 return data_fd;
             }
         }
+
+        // stream filters
+        filter = dlsym(lib, "filter");
+        if(filter) {
+            printf("Filter lib!\n");
+//            filter_lib_requested = 1;
+//            dlclose(lib);
+        }
     }
+
+    printf("[process] Filter pointer: %p\n", filter);
 
     time_per_packet = calculate_time_per_packet(sample_size, sample_rate, channels, BUFSIZE);
 
     err = send_request_response_success(client_fd, client, request->filename, sample_size, sample_rate, channels, time_per_packet);
-    if(err < 0) {
+    if(err < 0)
         return err;
-    }
 
 //    return 0;
 
-    return stream_data(client_fd, data_fd, client, lib, request->filename, time_per_packet);
+    err = stream_data(client_fd, data_fd, client, lib, request->filename, time_per_packet, filter);
+
+    return err;
 }
 
 /// unimportant: the signal handler. This function gets called when Ctrl^C is pressed
@@ -556,45 +533,6 @@ int main (int argc, char **argv)
 
 	// TODO re-enable for submission
 //	 signal(SIGINT, sigint_handler );	// trap Ctrl^C signals
-
-    // lib stuff, it works
-    /*char *libfile = "/home/thomas/Documents/sysprog/assignment4/libblank.so";
-    char *libarg = "mids";
-    void *mylibrary;
-
-    err = open_lib(libfile, mylibrary, libarg);
-
-    return 0;
-
-    server_filterfunc pfunc;
-
-    // optionally open a library
-    if (libfile){
-        // try to open the library, if one is requested
-        pfunc = NULL;
-
-        mylibrary = dlopen(libfile, RTLD_NOW);
-        if(mylibrary == NULL) {
-            printf("Failed to load library: %s\n", dlerror());
-            return -1;
-        }
-
-        pfunc = dlsym(mylibrary, "encode");
-
-        if (pfunc == NULL){
-            printf("Failed to load symbol: %s\n", dlerror());
-            return -1;
-        }
-
-        printf("opened libraryfile %s\n",libfile);
-
-        int result = pfunc("hi", 10);
-        dlclose(mylibrary);
-    }
-    else{
-        pfunc = NULL;
-        printf("not using a filter\n");
-    }*/
 
     client_fd = setup_socket(PORT, &flen, &client);
     if(client_fd < 0) {

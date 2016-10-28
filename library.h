@@ -1,10 +1,7 @@
-/* library.h
- *
- * part of the Systems Programming assignment
- * (c) Vrije Universiteit Amsterdam, 2005-2015. BSD License applies
- * author  : wdb -_at-_ few.vu.nl
- * contact : arno@cs.vu.nl
- * */
+#ifndef _LIBRARY_H_
+#define _LIBRARY_H_
+
+#include "packet.h"
 
 // this file define encode/decode filter calling conventions
 // make sure that your library routines adhere to these functions
@@ -19,10 +16,12 @@ int int_allowed;
 char *arg;
 int arg_int;
 
-typedef int (*server_filterfunc)(char *, int);
+typedef int (*server_filter)(struct audio_packet *);
 
 typedef int (*server_alter_sample_rate)(int);
 
 typedef int (*server_reverse)(char *, int);
 
 typedef int (*server_verify)(char *);
+
+#endif /* _LIBRARY_H_ */

@@ -15,7 +15,7 @@ LDFLAGS = -ldl
 ####################### TARGETS
 
 # add your libraries to this line, as in 'libtest.so', make sure you have a 'libtest.c' as source
-LIBS = alter_speed.so reverse.so
+LIBS = alter_speed.so reverse.so stream.so
 
 .PHONY : all clean distclean
 

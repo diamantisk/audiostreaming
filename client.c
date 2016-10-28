@@ -51,8 +51,6 @@ int receive_packet(fd_set *read_set, int server_fd, struct audio_packet *packet,
     struct timeval timeout;
     char packet_buffer[sizeof(struct audio_packet)];
 
-    bytesread = 0;
-
     timeout.tv_sec  = sec;
     timeout.tv_usec = usec;
 
@@ -74,6 +72,9 @@ int receive_packet(fd_set *read_set, int server_fd, struct audio_packet *packet,
     } else
     if(FD_ISSET(server_fd, read_set)) {
         bytesread = read(server_fd, packet_buffer, sizeof(struct audio_packet));
+        if(bytesread < 0)
+            return bytesread;
+
         // TODO debug
 //        printf("Received %d bytes\n", bytesread);
 
@@ -222,12 +223,12 @@ int parse_stream(int server_fd, int audio_fd, long time_per_packet) {
             printf("Read %d (%d) audio bytes (packet %d)\n", packet.audiobytesread, audiobytesread, packet.seq);
             if(packet.seq == seq_expected) {
 
-                int n, sample;
+                /*int n, sample;
                 for(n = 0; n < audiobytesread; n++) {
 //                    printf("Before: %d\n", packet.buffer[n]);
 //                    packet.buffer[n] = packet.buffer[n] * 0.5;
 //                    printf("After: %d (%d)\n", packet.buffer[n], n);
-                }
+                }*/
 
                 write(audio_fd, packet.buffer, audiobytesread);
             } else {

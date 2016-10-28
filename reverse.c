@@ -232,7 +232,7 @@ void _fini()
 
     err = remove(filename_write);
     if(err < 0) {
-        perror("Failed to delete .reverse file");
+        perror("Failed to delete temporary file from disk");
     }
 
     printf("Removed %s\n", filename_write);
