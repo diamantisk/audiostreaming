@@ -24,28 +24,56 @@
 #include "audio.h"
 #include "packet.h"
 
+// Minimal amount of (micro)seconds to wait for a server reply
 #define SERVER_TIMEOUT_SEC 1
-#define SERVER_TIMEOUT_USEC 0  // microseconds
+#define SERVER_TIMEOUT_USEC 0
+
+// Number of timeout iterations before assuming server is down or busy
 #define SERVER_TIMEOUT_THRESHOLD 5
 
-static int breakloop = 0;	///< use this variable to stop your wait-loop. Occasionally check its value, !1 signals that the program should close
+// Global desciptors for the sigint_handler
+int server_fd_g;
+int audio_fd_g;
 
-/// unimportant: the signal handler. This function gets called when Ctrl^C is pressed
+// Determine the frequency of printing feedback during streaming. This allows
+// you to prevent your stdout from flooding. Minimal value is 1.
+int print_frequency = 1;
+
+static int breakloop = 0;
+
+/** Attempt graceful close when Ctrl^C is pressed
+ *
+ * @param sigint the type of signal received
+ */
 void sigint_handler(int sigint)
 {
-    exit(-1);
-
 	if (!breakloop){
 		breakloop=1;
-		printf("SIGINT catched. Please wait to let the client close gracefully.\nTo close hard press Ctrl^C again.\n");
-	}
+		printf("\tSIGINT catched. Please wait to let the client close gracefully.\nTo close hard press Ctrl^C again.\n");
+
+        if(server_fd_g)
+            close(server_fd_g);
+        if(audio_fd_g)
+            close(audio_fd_g);
+
+        exit(0);
+    }
 	else{
-       		printf ("SIGINT occurred, exiting hard... please wait\n");
+       	printf ("SIGINT occurred, exiting hard... please wait\n");
 		exit(-1);
 	}
 }
 
-
+/** Receive a packet from the server
+ *
+ * @param read_set      a pointer to the set containing all descriptiors
+ * @param server_fd     the server descriptor
+ * @param packet        a pointer to the packet which will store the received packet
+ * @param sec           the amount of seconds to wait for a timeout
+ * @param usec          the amount of microseconds to wait for a timeout
+ * @return  Success: the number of bytes read
+ *          Failure: 0 if a timeout occurred, <0 otherwise
+ */
 int receive_packet(fd_set *read_set, int server_fd, struct audio_packet *packet, long sec, long usec) {
     int bytesread, nb;
     struct timeval timeout;
@@ -53,9 +81,6 @@ int receive_packet(fd_set *read_set, int server_fd, struct audio_packet *packet,
 
     timeout.tv_sec  = sec;
     timeout.tv_usec = usec;
-
-    // TODO debug
-//    printf("sec: %lu, usec: %lu (%lu)\n", sec, usec, usec / 1000000);
 
     // Set a timeout for the packet
     FD_ZERO(read_set);
@@ -67,16 +92,13 @@ int receive_packet(fd_set *read_set, int server_fd, struct audio_packet *packet,
         return -1;
     } else
     if(nb == 0) {
-//        printf("No reply, assuming that server is down\n");
+        // Server failed to deliver a packet in time
         return 0;
     } else
     if(FD_ISSET(server_fd, read_set)) {
         bytesread = read(server_fd, packet_buffer, sizeof(struct audio_packet));
         if(bytesread < 0)
             return bytesread;
-
-        // TODO debug
-//        printf("Received %d bytes\n", bytesread);
 
         // Cast the received buffer to a packet struct and copy the data to the original packet
         struct audio_packet *received_packet = (struct audio_packet *) packet_buffer;
@@ -95,7 +117,7 @@ int receive_packet(fd_set *read_set, int server_fd, struct audio_packet *packet,
  *
  * @param name   The hostname
  *
- * @return  The IP on success, <0 otherwise
+ * @return  The IP address string
  */
 char *resolve_hostname(char *name) {
     struct hostent *resolve;
@@ -129,6 +151,8 @@ int setup_socket(char *ip, int port, struct sockaddr_in *server) {
         return -1;
     }
 
+    server_fd_g = server_fd;
+
     server->sin_family = AF_INET;
     server->sin_port = htons(port);
     server->sin_addr.s_addr = inet_addr(ip);
@@ -150,11 +174,13 @@ int open_output(struct audio_info *info) {
         return -1;
     }
 
+    audio_fd_g = audio_fd;
+
     return audio_fd;
 }
 
 /** Receive the initial audio info packet
- * @param server_fd the server descriptor
+ * @param server_fd     the server descriptor
  * @param info_buffer   the buffer to load the bytes from the audio packet into
  *
  * @return the number of bytes read on success, <0 otherwise
@@ -183,23 +209,20 @@ int receive_audio_info(int server_fd, char *info_buffer) {
     } else
     if(FD_ISSET(server_fd, &read_set)) {
         bytesread = read(server_fd, info_buffer, sizeof(struct audio_info));
-        // TODO debug
-        // printf("Received %d bytes: %s\n", bytesread, info_buffer);
-
     }
 
     return bytesread;
 }
 
 /** Receive data packets from the stream and write them to audio
- * @param server_fd the server descriptor
- * @param audio_fd  the audio descriptor
+ * @param server_fd         the server descriptor
+ * @param audio_fd          the audio descriptor
  * @param time_per_packet   the time it takes to write a packet to audio
  *
  * @return 0 on success, <0 otherwise
  */
 int parse_stream(int server_fd, int audio_fd, long time_per_packet) {
-    int audiobytesread, packet_timeouts, seq_expected;
+    int audiobytesread, packet_timeouts, seq_expected, i;
     long packet_timeout_sec, packet_timeout_usec;
     fd_set read_set;
     struct audio_packet packet;
@@ -220,32 +243,23 @@ int parse_stream(int server_fd, int audio_fd, long time_per_packet) {
             printf("Waiting for reply (%d)...\n", packet_timeouts);
             packet_timeouts ++;
         } else {
-            printf("Read %d (%d) audio bytes (packet %d)\n", packet.audiobytesread, audiobytesread, packet.seq);
+            if(i ++ % print_frequency == 0)
+                printf("Read %d (%d) audio bytes (packet sequence number: %d)\n", packet.audiobytesread, audiobytesread, packet.seq);
+
             if(packet.seq == seq_expected) {
-
-                /*int n, sample;
-                for(n = 0; n < audiobytesread; n++) {
-//                    printf("Before: %d\n", packet.buffer[n]);
-//                    packet.buffer[n] = packet.buffer[n] * 0.5;
-//                    printf("After: %d (%d)\n", packet.buffer[n], n);
-                }*/
-
                 write(audio_fd, packet.buffer, audiobytesread);
             } else {
                 printf("Wrong packet, expected %d but received %d\n", seq_expected, packet.seq);
-                // TODO what to do?
             }
 
             seq_expected ++;
-            //            printf("Sizeof(packet.buffer): %d\n", sizeof(packet.buffer));
         }
 
         audiobytesread = receive_packet(&read_set, server_fd, &packet, packet_timeout_sec, packet_timeout_usec);
     }
 
     if(audiobytesread > 0) {
-        // TODO debug
-        printf("Read %d (%d) audio bytes (packet %d)\n", packet.audiobytesread, audiobytesread, packet.seq);
+        printf("Read %d (%d) audio bytes (packet sequence number: %d)\n", packet.audiobytesread, audiobytesread, packet.seq);
 
         write(audio_fd, packet.buffer, packet.audiobytesread);
     }
@@ -253,10 +267,13 @@ int parse_stream(int server_fd, int audio_fd, long time_per_packet) {
     return 0;
 }
 
+/** Process the server response from the request
+ *
+ * @param status    the status of the server response
+ * @return 0 on success, <0 otherwise
+ */
 int process_request_response(enum flag status) {
-    printf("Server responded: ");
-
-//    enum flag {SUCCESS, FILE_NOT_FOUND, LIBRARY_NOT_FOUND, LIBRARY_ARG_NOT_FOUND, FAILURE} status;
+    printf("Server response: ");
 
     switch(status) {
         case SUCCESS:
@@ -268,8 +285,8 @@ int process_request_response(enum flag status) {
         case LIBRARY_NOT_FOUND:
             printf("LIBRARY_NOT_FOUND\n");
             break;
-        case LIBRARY_ARG_NOT_FOUND:
-            printf("LIBRARY_ARG_NOT_FOUND\n");
+        case LIBRARY_ARG_NOT_ALLOWED:
+            printf("LIBRARY_ARG_NOT_ALLOWED\n");
             break;
         case LIBRARY_ARG_REQUIRED:
             printf("LIBRARY_ARG_REQUIRED\n");
@@ -278,7 +295,7 @@ int process_request_response(enum flag status) {
             printf("FAILURE\n");
             break;
         default:
-            printf("INVALID RESPONSE\n");
+            printf("UNEXPECTED ERROR\n");
     }
 
     return -1;
@@ -297,13 +314,14 @@ int send_request(int server_fd, struct sockaddr_in *server, struct request_packe
     char info_buffer[sizeof(struct audio_info)];
     struct audio_info *response;
 
-    printf("Sent %ld bytes\n", sizeof(struct request_packet));
+    // Send the request
     err = sendto(server_fd, request, sizeof(struct request_packet), 0, (struct sockaddr*) server, sizeof(struct sockaddr_in));
     if(err < 0) {
         perror("Error sending packet");
         return -1;
     }
 
+    // Receive the information about the audio file
     err = receive_audio_info(server_fd, info_buffer);
     if(err < 0) {
         return err;
@@ -311,6 +329,7 @@ int send_request(int server_fd, struct sockaddr_in *server, struct request_packe
 
     response = (struct audio_info *) info_buffer;
 
+    // Process the request response
     err = process_request_response(response->status);
     if(err < 0) {
         printf("No successful response, aborting\n");
@@ -329,42 +348,45 @@ int send_request(int server_fd, struct sockaddr_in *server, struct request_packe
 }
 
 /** Create a request packet to send to the server
- * @param argc  the amount of command line arguments
- * @param argv  the string array of arguments
+ * @param argc      the amount of command line arguments
+ * @param argv      the string array of arguments
  * @param request   a pointer to the request packet
  *
  * @return 0 on success, <0 otherwise
  */
 int create_request (int argc, char **argv, struct request_packet *request) {
-    printf("Request with %d values\n", argc);
-
-    if(strlen(argv[2]) > FILESIZE_MAX) {
-        printf("Filename is too long, max %d characters\n", FILESIZE_MAX);
+    // Verify the size of the arguments
+    if(strlen(argv[2]) > FILESIZE_MAX - 1) {
+        printf("Filename is too long (%lu characters), max %d characters\n", strlen(argv[2]), FILESIZE_MAX - 1);
         return -1;
     }
 
-    if(argc > 3 && strlen(argv[3]) > FILESIZE_MAX) {
-        printf("Library filename is too long, max %d characters\n", FILESIZE_MAX);
+    if(argc > 3 && strlen(argv[3]) > FILESIZE_MAX - 1) {
+        printf("Library filename is too long (%lu characters), max %d characters\n", strlen(argv[3]), FILESIZE_MAX - 1);
         return -1;
     }
 
-    strncpy(request->filename, argv[2], strlen(argv[2]) + 1);
-    request->filename[strlen(argv[2]) + 1] = '\0';
+    if(argc > 4 && strlen(argv[4]) > FILESIZE_MAX - 1) {
+        printf("Library argument is too long (%lu characters), max %d characters\n", strlen(argv[4]), FILESIZE_MAX - 1);
+        return -1;
+    }
+
+    // Store the information in the request packet
+    strncpy(request->filename, argv[2], strlen(argv[2]));
+    request->filename[strlen(argv[2])] = '\0';
 
     if(argc > 3) {
-        strncpy(request->libname, argv[3], strlen(argv[3]) + 1);
-        request->libname[strlen(argv[3]) + 1] = '\0';
+        strncpy(request->libname, argv[3], strlen(argv[3]));
+        request->libname[strlen(argv[3])] = '\0';
     } else {
-        printf("no libname\n");
         strncpy(request->libname, NONE, strlen(NONE));
         request->libname[strlen(NONE)] = '\0';
     }
 
     if(argc > 4) {
-        strncpy(request->libarg, argv[4], strlen(argv[4]) + 1);
-        request->libarg[strlen(argv[4]) + 1] = '\0';
+        strncpy(request->libarg, argv[4], strlen(argv[4]));
+        request->libarg[strlen(argv[4])] = '\0';
     } else {
-        printf("no libargs\n");
         strncpy(request->libarg, NONE, strlen(NONE));
         request->libarg[strlen(NONE)] = '\0';
     }
@@ -380,8 +402,8 @@ int main (int argc, char *argv [])
 	struct audio_info info;
 	struct request_packet request;
 
-    // TODO re-enable for submission
-	// signal( SIGINT, sigint_handler );	// trap Ctrl^C signals
+    // trap Ctrl^C signals
+    signal( SIGINT, sigint_handler );
 
 	// parse arguments
 	if (argc < 3 || argc > 5){
@@ -398,11 +420,8 @@ int main (int argc, char *argv [])
 	ip = resolve_hostname(argv[1]);
 
     server_fd = setup_socket(ip, PORT, &server);
-
-    // Send the filename to the server
-    // TODO make packet with library information
-
-    printf("Requesting %s from %s:%d\n", request.filename, ip, PORT);
+    if(server_fd < 0)
+        return -1;
 
     err = send_request(server_fd, &server, &request, &info);
     if(err < 0) {
@@ -416,29 +435,11 @@ int main (int argc, char *argv [])
         return -1;
     }
 
-	// open the library on the clientside if one is requested
-	// TODO implement
-	/*if (argv[3] && strcmp(argv[3],"")){
-		// try to open the library, if one is requested
-		pfunc = NULL;
-		if (!pfunc){
-			printf("failed to open the requested library. breaking hard\n");
-			return -1;
-		}
-		printf("opened libraryfile %s\n",argv[3]);
-	}
-	else{
-		pfunc = NULL;
-		printf("Not using a filter\n");
-	}*/
-
 	err = parse_stream(server_fd, audio_fd, info.time_per_packet);
     if(err < 0) {
         printf("Failed to parse stream\n");
         return -1;
     }
-
-	printf("Done\n");
 
 	if (audio_fd >= 0)
 		close(audio_fd);

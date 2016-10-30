@@ -68,15 +68,8 @@ void reverseBuffer(char *str, int n, int channels) {
             str[i] = str[i + 1];
             str[i + 1] = tmp;
             str[i] = 0;
-//            str[i + 1] = 0;
         }
     }
-
-//    stereo stuff
-//    for(i = 0; i < n; i += 4) {
-//        str[i + 2] = 0;
-//        str[i + 3] = 0;
-//    }
 }
 
 /**
@@ -88,8 +81,6 @@ void reverseBuffer(char *str, int n, int channels) {
 int writeRecursive(struct node *current, int numberOfNodes, int wd, int channels) {
     int err;
     reverseBuffer(current->buf, current->size, channels);
-
-//    printf("WRITING STUFF TO WD: %d\n", wd);
 
     if(current->name == numberOfNodes) {
         err = write(wd, current->buf, current->size);
@@ -131,15 +122,9 @@ int reverse(char *filename, int channels) {
         return -1;
     }
 
-//    int filename_write_size = strlen(filename_new);
     filename_write = (char *) malloc(sizeof(char) * strlen(filename_new));
     strncpy(filename_write, filename_new, strlen(filename_new));
     filename_write[strlen(filename_new)] = '\0';
-
-    // TODO debug
-//    printf("filename: %s (%lu)\n", filename, strlen(filename));
-//
-//    printf("filename_write: %s (%lu, expected %d)\n", filename_write, strlen(filename_write), filename_write_size);
 
     int wd = open(filename_write, O_CREAT | O_RDWR, S_IRWXU);
     if(wd == -1) {
@@ -212,8 +197,6 @@ int reverse(char *filename, int channels) {
     // Free the final element of The linked list
     free(current->buf);
     free(current);
-
-    // printf("content of previous: %s\n", previous->buf);
 
     close(fd);
     close(wd);

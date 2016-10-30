@@ -24,19 +24,8 @@ void _init()
 }
 
 int filter(struct audio_packet *packet) {
-    // TODO debug
-//    printf("lib filter here (arg_int: %d, %f)\n", arg_int, (float) arg_int / 100);
-
     for(int i = 0; i < packet->audiobytesread; i ++) {
-//        packet->buffer[i] *= (float) arg_int / 100;
-
-        if(packet->buffer[i] > 120) {
-            packet->buffer[i] = 120;
-        }
-
-        if(packet->buffer[i] < 20) {
-            packet->buffer[i] = 20;
-        }
+        packet->buffer[i] *= (float) arg_int / 100;
     }
 
     return 0;

@@ -8,12 +8,12 @@
 //extern int PORT, BUFSIZE, FILESIZE_MAX;
 
 struct __attribute__((packed)) audio_info {
-    int channels;
     int sample_size;
     int sample_rate;
+    int channels;
     long time_per_packet;   // Nanoseconds
     char filename[FILESIZE_MAX];
-    enum flag {SUCCESS, FILE_NOT_FOUND, LIBRARY_NOT_FOUND, LIBRARY_ARG_NOT_FOUND, LIBRARY_ARG_REQUIRED, FAILURE} status;
+    enum flag {SUCCESS, FILE_NOT_FOUND, LIBRARY_NOT_FOUND, LIBRARY_ARG_NOT_ALLOWED, LIBRARY_ARG_REQUIRED, FAILURE} status;
 };
 
 struct __attribute__((packed)) request_packet {

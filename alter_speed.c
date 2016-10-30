@@ -49,9 +49,6 @@ int alter_sample_rate(int sample_rate) {
     return (int) result_float;
 }
 
-/** Verify whether the filter argument is applicable to the library
- *  TODO expand
- */
 int verify_arg(char *libarg) {
     int i = 0;
     while(i < num_args_allowed) {
