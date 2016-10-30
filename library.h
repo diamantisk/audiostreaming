@@ -3,11 +3,7 @@
 
 #include "packet.h"
 
-// this file define encode/decode filter calling conventions
-// make sure that your library routines adhere to these functions
-//
-// ofcourse, when either is useless you do not have to implement it
-// for example, there's no reason to create a decoder for a 44.1->22 kHz convertor
+// Convenient global defines
 #define NONE    "none"
 #define INT     "int"
 

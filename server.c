@@ -1,5 +1,3 @@
-
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -15,7 +13,7 @@
 #include "audio.h"
 #include "packet.h"
 
-static int breakloop = 0;	///< use this variable to stop your wait-loop. Occasionally check its value, !1 signals that the program should close
+static int breakloop = 0;
 
 // Global desciptors for the sigint_handler
 int data_fd_g;
@@ -24,7 +22,7 @@ void *lib_g;
 
 // This value allows the time between sending packets to be decreased, preventing
 // small silent gaps on the client side in case of a long network travel time.
-// Values around 0.95-0.97 allow for sufficient padding but not overflowing the client.
+// Values around 0.95-0.97 allow for sufficient kernel padding but not overflowing the client.
 float stream_padding = 0.95;
 
 /** Attempt graceful close when Ctrl^C is pressed
@@ -341,10 +339,9 @@ void *open_lib(char *libname, char *libarg, void *lib, int client_fd, struct soc
 int process_lib(void *lib, int client_fd, struct sockaddr_in *client, int *sample_rate, int *sample_size, int *channels, int data_fd, struct request_packet *request) {
     int err;
 
-    if(lib == NULL) {
-        // No library to process
+    // No library to process
+    if(lib == NULL)
         return 0;
-    }
 
     // alter_speed
     server_alter_sample_rate alter_sample_rate = dlsym(lib, "alter_sample_rate");

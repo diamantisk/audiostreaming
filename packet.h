@@ -3,9 +3,7 @@
 
 #define BUFSIZE 1024
 #define PORT 12345
-#define FILESIZE_MAX 100
-
-//extern int PORT, BUFSIZE, FILESIZE_MAX;
+#define FILESIZE_MAX 101
 
 struct __attribute__((packed)) audio_info {
     int sample_size;

@@ -1,11 +1,3 @@
-/* client.c
- *
- * part of the Systems Programming assignment
- * (c) Vrije Universiteit Amsterdam, 2005-2015. BSD License applies
- * author  : wdb -_at-_ few.vu.nl
- * contact : arno@cs.vu.nl
- * */
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -13,7 +5,6 @@
 #include <unistd.h>
 #include <dlfcn.h>
 #include <netinet/in.h>
-
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -36,7 +27,8 @@ int server_fd_g;
 int audio_fd_g;
 
 // Determine the frequency of printing feedback during streaming. This allows
-// you to prevent your stdout from flooding. Minimal value is 1.
+// you to prevent your stdout from flooding. Higher value is less frequent printing.
+// Minimal value is 1.
 int print_frequency = 1;
 
 static int breakloop = 0;
@@ -235,14 +227,17 @@ int parse_stream(int server_fd, int audio_fd, long time_per_packet) {
     audiobytesread = receive_packet(&read_set, server_fd, &packet, packet_timeout_sec, packet_timeout_usec);
 
     while (audiobytesread == BUFSIZE || audiobytesread == 0) {
+        // When a timeout occurs, wait a set amount of intervals and then abort
         if(audiobytesread == 0) {
             if(packet_timeouts == SERVER_TIMEOUT_THRESHOLD) {
                 printf("Too many timeouts, aborting\n");
                 return -1;
             }
+
             printf("Waiting for reply (%d)...\n", packet_timeouts);
             packet_timeouts ++;
         } else {
+            // Only print feedback on the requested frequency
             if(i ++ % print_frequency == 0)
                 printf("Read %d (%d) audio bytes (packet sequence number: %d)\n", packet.audiobytesread, audiobytesread, packet.seq);
 
@@ -258,6 +253,7 @@ int parse_stream(int server_fd, int audio_fd, long time_per_packet) {
         audiobytesread = receive_packet(&read_set, server_fd, &packet, packet_timeout_sec, packet_timeout_usec);
     }
 
+    // Parse the final packet received outside the loop
     if(audiobytesread > 0) {
         printf("Read %d (%d) audio bytes (packet sequence number: %d)\n", packet.audiobytesread, audiobytesread, packet.seq);
 
@@ -401,11 +397,9 @@ int main (int argc, char *argv [])
 	struct sockaddr_in server;
 	struct audio_info info;
 	struct request_packet request;
-
-    // trap Ctrl^C signals
+    
     signal( SIGINT, sigint_handler );
 
-	// parse arguments
 	if (argc < 3 || argc > 5){
 		printf ("error : called with incorrect number of parameters\nusage : %s <server_name/IP> <filename> [<filter> [filter_option]]\n", argv[0]) ;
 		return -1;
